@@ -65,16 +65,10 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(err => {
-        if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-          throw new Error("Microfone não encontrado.");
-        }
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          throw new Error("Acesso ao microfone negado.");
-        }
         throw new Error("Erro ao acessar microfone.");
       });
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
@@ -82,10 +76,10 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
-            if (isClosingRef.current) return;
+            if (isClosingRef.current || !audioContextRef.current) return;
             setIsListening(true);
-            const source = audioContextRef.current!.createMediaStreamSource(stream);
-            const scriptProcessor = audioContextRef.current!.createScriptProcessor(4096, 1, 1);
+            const source = audioContextRef.current.createMediaStreamSource(stream);
+            const scriptProcessor = audioContextRef.current.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => {
               if (isClosingRef.current) return;
               const inputData = e.inputBuffer.getChannelData(0);
@@ -94,13 +88,13 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
               });
             };
             source.connect(scriptProcessor);
-            scriptProcessor.connect(audioContextRef.current!.destination);
+            scriptProcessor.connect(audioContextRef.current.destination);
           },
           onmessage: async (message: LiveServerMessage) => {
             if (isClosingRef.current) return;
 
             if (message.serverContent?.outputTranscription) {
-              setTranscript(prev => prev + " " + message.serverContent?.outputTranscription?.text);
+              setTranscript(prev => prev + " " + (message.serverContent?.outputTranscription?.text || ''));
             }
             
             const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
@@ -143,7 +137,7 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
                   
                   sessionPromise.then(s => {
                     if (!isClosingRef.current) s.sendToolResponse({
-                      functionResponses: { id: fc.id, name: fc.name, response: { result } }
+                      functionResponses: { id: fc.id, name: fc.name, response: { result: { result } } }
                     });
                   });
                 }

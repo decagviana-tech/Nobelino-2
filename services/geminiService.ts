@@ -35,11 +35,10 @@ export async function processUserQuery(
   salesGoals: SalesGoal[] = [],
   disableGrounding: boolean = false
 ): Promise<AIResult> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   const today = new Date().toISOString().split('T')[0];
   const todayGoal = salesGoals.find(g => g.date === today) || { actualSales: 0, minGoal: 0, superGoal: 0 };
   
-  // Dados contextuais que o modelo conhece, mas não deve revelar sem pedido
   const salesContext = `[SISTEMA - DADOS PRIVADOS]: Hoje foi vendido R$ ${todayGoal.actualSales.toFixed(2)} de uma meta de R$ ${todayGoal.minGoal.toFixed(2)}.`;
   const personalKnowledge = knowledgeBase.filter(k => k.active).map(k => `[REGRA/CONHECIMENTO]: ${k.topic}: ${k.content}`).join('\n');
 
@@ -48,10 +47,10 @@ export async function processUserQuery(
 
   REGRAS CRÍTICAS DE COMPORTAMENTO:
   1. FOCO NO CLIENTE: Seu objetivo principal é ajudar o vendedor a encontrar o livro certo e dar argumentos de venda.
-  2. SIGILO DE DADOS FINANCEIROS: Você tem acesso aos dados de metas, mas NÃO deve mencioná-los em conversas sobre indicações de livros ou dúvidas gerais. Só informe valores de venda ou progresso de metas se o vendedor perguntar EXPLICITAMENTE (ex: "Como estão as vendas hoje?", "Quanto falta para a meta?").
-  3. WHATSAPP E REDES SOCIAIS: NÃO gere automaticamente "Dicas de Venda" ou modelos de mensagem para WhatsApp/Instagram. Forneça esses textos APENAS se o usuário solicitar ajuda específica para vender digitalmente (ex: "me dá um texto pro zap", "como posto isso no insta?").
-  4. ESTOQUE: Sempre priorize o que está no estoque físico. Se houver poucas unidades (1 ou 2), use o gatilho de "última unidade no balcão".
-  5. PARCEIROS: Se não houver estoque, lembre o vendedor de consultar a encomenda via Catavento ou Ramalivros.
+  2. SIGILO DE DADOS FINANCEIROS: Você tem acesso aos dados de metas, mas NÃO deve mencioná-los em conversas sobre indicações de livros ou dúvidas gerais. Só informe valores de venda ou progresso de metas se o vendedor perguntar EXPLICITAMENTE.
+  3. WHATSAPP E REDES SOCIAIS: NÃO gere automaticamente "Dicas de Venda" ou modelos de mensagem. Forneça esses textos APENAS se o usuário solicitar ajuda específica.
+  4. ESTOQUE: Sempre priorize o que está no estoque físico. Use o gatilho de "última unidade no balcão" se houver 1 ou 2.
+  5. PARCEIROS: Se não houver estoque, lembre o vendedor de consultar Catavento ou Ramalivros.
   6. ESTILO: Seja carismático, use emojis de livros e termine com 🦉.
 
   CONTEXTO ATUAL:
@@ -59,7 +58,7 @@ export async function processUserQuery(
   ${personalKnowledge}`;
 
   const contents = history.slice(-5).map(msg => ({
-    role: msg.role === 'assistant' ? 'model' : 'user',
+    role: msg.role === 'assistant' ? 'model' : 'user' as any,
     parts: [{ text: msg.content || "" }]
   }));
   contents.push({ role: 'user', parts: [{ text: query }] });
@@ -78,10 +77,13 @@ export async function processUserQuery(
     const functionCalls = response.functionCalls;
 
     if (!functionCalls || functionCalls.length === 0) {
+      const parts = candidate?.content?.parts || [];
+      const text = parts.filter(p => p.text).map(p => p.text).join("\n") || "🦉 Como posso ajudar?";
+      
       return {
-        responseText: candidate.content.parts.filter(p => p.text).map(p => p.text).join("\n"),
+        responseText: text,
         recommendedBooks: [],
-        groundingUrls: (candidate.groundingMetadata?.groundingChunks || [])
+        groundingUrls: (candidate?.groundingMetadata?.groundingChunks || [])
           .filter((c: any) => c.web)
           .map((c: any) => ({ uri: c.web.uri, title: c.web.title }))
       };
@@ -116,7 +118,7 @@ export async function processUserQuery(
       model: "gemini-3-flash-preview",
       contents: [
         ...contents,
-        { role: 'model', parts: candidate.content.parts },
+        { role: 'model', parts: candidate?.content?.parts || [] },
         { role: 'user', parts: functionResponses as any }
       ],
       config: { systemInstruction, temperature: 0.3 }
@@ -135,7 +137,7 @@ export async function processUserQuery(
 }
 
 export async function enrichBooks(books: Book[], retries = 2): Promise<Partial<Book>[]> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
