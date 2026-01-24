@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, Book, KnowledgeEntry, SalesGoal, UsageMetrics } from '../types';
 import { INITIAL_INVENTORY } from '../data/mockInventory';
-import { processUserQuery } from '../services/geminiService';
+import { processUserQuery, speakText } from '../services/geminiService';
 import { db } from '../services/db';
 import Mascot from './Mascot';
 import VoiceConsultant from './VoiceConsultant';
@@ -13,10 +13,13 @@ const ChatView: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [autoVoice, setAutoVoice] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [quotaCooldown, setQuotaCooldown] = useState(0);
   const [hasConnectionError, setHasConnectionError] = useState(false);
   const [currentMood, setCurrentMood] = useState<'happy' | 'thinking' | 'surprised' | 'tired' | 'success'>('happy');
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -38,23 +41,27 @@ const ChatView: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  useEffect(() => {
     let timer: any;
     if (quotaCooldown > 0 || hasConnectionError) {
       setCurrentMood('tired');
       if (quotaCooldown > 0) {
-        timer = setInterval(() => {
-          setQuotaCooldown(c => Math.max(0, c - 1));
-        }, 1000);
+        timer = setInterval(() => setQuotaCooldown(c => Math.max(0, c - 1)), 1000);
       }
     } else if (isLoading) {
       setCurrentMood('thinking');
+    } else if (isSpeaking) {
+      setCurrentMood('happy');
     } else if (messages.length > 0 && messages[messages.length - 1].suggestedBooks?.length) {
       setCurrentMood('success');
     } else {
       setCurrentMood('happy');
     }
     return () => clearInterval(timer);
-  }, [quotaCooldown, isLoading, messages, hasConnectionError]);
+  }, [quotaCooldown, isLoading, messages, hasConnectionError, isSpeaking]);
 
   const resetChat = async () => {
     const welcome = "🦉 Olá! Nobelino pronto para o balcão. Qual o desafio de vendas hoje?";
@@ -64,18 +71,41 @@ const ChatView: React.FC = () => {
     await db.save('nobel_chat_history', [initialMsg]);
   };
 
-  const incrementUsage = async () => {
-    const today = new Date().toISOString().split('T')[0];
-    const metrics: UsageMetrics = await db.get('nobel_usage_metrics') || { dailyRequests: 0, lastResetDate: today, totalTokensEstimate: 0 };
-    
-    if (metrics.lastResetDate !== today) {
-      metrics.dailyRequests = 1;
-      metrics.lastResetDate = today;
-    } else {
-      metrics.dailyRequests += 1;
+  const decodeAudio = async (base64: string, ctx: AudioContext) => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const dataInt16 = new Int16Array(bytes.buffer);
+    const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
+    const channelData = buffer.getChannelData(0);
+    for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
+    return buffer;
+  };
+
+  const playResponse = async (text: string) => {
+    if (isSpeaking) return;
+    setIsSpeaking(true);
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+      if (audioContextRef.current.state === 'suspended') await audioContextRef.current.resume();
+      
+      const audioData = await speakText(text);
+      if (audioData) {
+        const buffer = await decodeAudio(audioData, audioContextRef.current);
+        const source = audioContextRef.current.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioContextRef.current.destination);
+        source.onended = () => setIsSpeaking(false);
+        source.start(0);
+      } else {
+        setIsSpeaking(false);
+      }
+    } catch (e) {
+      console.error("Erro ao reproduzir áudio:", e);
+      setIsSpeaking(false);
     }
-    await db.save('nobel_usage_metrics', metrics);
-    window.dispatchEvent(new CustomEvent('nobel_usage_updated'));
   };
 
   const handleSend = async () => {
@@ -89,32 +119,31 @@ const ChatView: React.FC = () => {
     setHasConnectionError(false);
 
     try {
-      const latestGoals = await db.get('nobel_sales_goals') || [];
-      const latestKnowledge = await db.get('nobel_knowledge_base') || [];
-      const latestInventory = await db.get('nobel_inventory') || inventory;
-      
-      const result = await processUserQuery(trimmedInput, latestInventory, messages, latestKnowledge, latestGoals);
+      const result = await processUserQuery(trimmedInput, inventory, messages, knowledge);
       
       if (result.isQuotaError) {
         setQuotaCooldown(60);
       } else {
-        await incrementUsage();
-        setMessages(prev => [...prev, { 
+        const assistantMsg: ChatMessage = { 
           role: 'assistant', 
           content: result.responseText, 
           timestamp: new Date(),
           suggestedBooks: result.recommendedBooks,
           groundingUrls: result.groundingUrls
-        }]);
+        };
+        setMessages(prev => [...prev, assistantMsg]);
+        await db.save('nobel_chat_history', [...messages, userMsg, assistantMsg]);
+        if (autoVoice) playResponse(result.responseText);
       }
     } catch (e: any) {
-      console.error("Erro Nobelino:", e);
+      console.error("Erro no Chat:", e);
       setHasConnectionError(true);
-      setMessages(prev => [...prev, { 
+      const errorMsg: ChatMessage = { 
         role: 'assistant', 
-        content: '🦉 Ops! Minha inteligência está desligada. Parece que a API_KEY não foi configurada no Netlify. Siga o passo a passo para me ativar!', 
+        content: `🦉 Desculpe, tive um problema técnico: ${e.message || 'Erro de conexão'}.`, 
         timestamp: new Date() 
-      }]);
+      };
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
     }
@@ -127,11 +156,18 @@ const ChatView: React.FC = () => {
        <header className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50 backdrop-blur-md sticky top-0 z-10">
           <div className="flex items-center gap-3">
              <div className="w-12 h-12">
-                <Mascot animated={isLoading || currentMood === 'success'} talking={isLoading} mood={currentMood} />
+                <Mascot animated={isLoading || currentMood === 'success'} talking={isLoading || isSpeaking} mood={currentMood} />
              </div>
              <div>
                 <h2 className="text-sm font-black uppercase tracking-widest text-zinc-100">Consultor Nobelino</h2>
-                <p className="text-[7px] text-zinc-600 font-bold uppercase tracking-[0.4em]">Inteligência de Vendas Ativa</p>
+                <div className="flex items-center gap-2 mt-1">
+                   <button 
+                     onClick={() => setAutoVoice(!autoVoice)}
+                     className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${autoVoice ? 'bg-yellow-400 border-yellow-400 text-black' : 'border-zinc-800 text-zinc-600'}`}
+                   >
+                     {autoVoice ? 'Auto-Voz ON' : 'Auto-Voz OFF'}
+                   </button>
+                </div>
              </div>
           </div>
           <div className="flex gap-2">
@@ -147,21 +183,17 @@ const ChatView: React.FC = () => {
        </header>
        
        <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-10 custom-scrollbar">
-         {hasConnectionError && (
-           <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-[40px] mb-8 animate-in slide-in-from-top-4">
-             <h3 className="text-red-500 font-black uppercase text-xs tracking-widest mb-4">⚠️ Falha de Configuração</h3>
-             <p className="text-zinc-400 text-sm leading-relaxed mb-6">
-               O Nobelino precisa de uma <b>API_KEY</b> para funcionar. Vá ao painel do Netlify e adicione a variável de ambiente.
-             </p>
-             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="inline-block bg-white text-black px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-yellow-400 transition-all">
-               Pegar minha Chave Grátis ↗
-             </a>
-           </div>
-         )}
-
          {messages.map((m, i) => (
            <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} w-full animate-in fade-in slide-in-from-bottom-4 group`}>
               <div className={`max-w-[85%] p-6 rounded-[32px] text-sm shadow-2xl relative transition-all ${m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800'}`}>
+                {m.role === 'assistant' && (
+                  <button 
+                    onClick={() => playResponse(m.content)}
+                    className="absolute -right-12 top-2 p-2 bg-zinc-800 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-lg"
+                  >
+                    🔊
+                  </button>
+                )}
                 {(m.content || "").split('\n').map((line, idx) => (
                   <p key={idx} className="mb-3">{line}</p>
                 ))}
@@ -170,7 +202,7 @@ const ChatView: React.FC = () => {
               {m.suggestedBooks && m.suggestedBooks.length > 0 && (
                 <div className="mt-6 w-full flex gap-5 overflow-x-auto pb-6 snap-x custom-scrollbar">
                   {m.suggestedBooks.map(book => (
-                    <div key={book.id} className="min-w-[280px] bg-zinc-900 border border-zinc-800 p-6 rounded-[40px] snap-start relative overflow-hidden group/card hover:border-yellow-400/50 transition-all">
+                    <div key={book.id} className="min-w-[280px] bg-zinc-900 border border-zinc-800 p-6 rounded-[40px] snap-start relative group/card hover:border-yellow-400/50 transition-all">
                       <h4 className="font-black text-white text-lg leading-tight mb-1 line-clamp-1">{book.title}</h4>
                       <p className="text-[10px] font-black text-zinc-500 uppercase mb-4">{book.author}</p>
                       <div className="flex justify-between items-end">
@@ -183,6 +215,13 @@ const ChatView: React.FC = () => {
               )}
            </div>
          ))}
+         {isLoading && (
+           <div className="flex items-start w-full animate-pulse">
+              <div className="bg-zinc-900 text-zinc-500 p-6 rounded-[32px] text-xs font-black uppercase tracking-widest border border-zinc-800">
+                🦉 Nobelino está pensando...
+              </div>
+           </div>
+         )}
          <div ref={chatEndRef} />
        </div>
 

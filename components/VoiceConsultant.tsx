@@ -63,9 +63,7 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
         throw new Error("Seu navegador não suporta entrada de voz.");
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(err => {
-        throw new Error("Erro ao acessar microfone.");
-      });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -97,7 +95,8 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
             }
             
             const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-            if (audioData && outputAudioContextRef.current && outputAudioContextRef.current.state !== 'closed') {
+            if (audioData && outputAudioContextRef.current) {
+              if (outputAudioContextRef.current.state === 'suspended') await outputAudioContextRef.current.resume();
               setIsSpeaking(true);
               const ctx = outputAudioContextRef.current;
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
@@ -105,10 +104,10 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
               const source = ctx.createBufferSource();
               source.buffer = buffer;
               source.connect(ctx.destination);
-              source.addEventListener('ended', () => {
+              source.onended = () => {
                 sourcesRef.current.delete(source);
                 if (sourcesRef.current.size === 0) setIsSpeaking(false);
-              });
+              };
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
               sourcesRef.current.add(source);
@@ -120,83 +119,31 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
               nextStartTimeRef.current = 0;
               setIsSpeaking(false);
             }
-            
-            if (message.toolCall) {
-              const calls = message.toolCall.functionCalls || [];
-              for (const fc of calls) {
-                if (fc.name === 'consultarEstoqueInterno') {
-                  const args = fc.args as any;
-                  const termo = String(args.termo || '').toLowerCase();
-                  const matches = inventory.filter(b => 
-                    b.title.toLowerCase().includes(termo) || 
-                    b.isbn.includes(termo)
-                  ).slice(0, 3);
-                  
-                  const result = matches.length > 0 
-                    ? `NO ESTOQUE: ${matches.map(m => `${m.title} por R$${m.price}`).join(', ')}`
-                    : "Lamento, não encontrei no balcão agora.";
-                  
-                  sessionPromise.then(s => {
-                    if (!isClosingRef.current) s.sendToolResponse({
-                      functionResponses: { id: fc.id, name: fc.name, response: { result: { result } } }
-                    });
-                  });
-                }
-              }
-            }
           },
           onclose: () => stopSession(),
           onerror: (e) => {
-            console.error("Erro Live API:", e);
-            setError("Conexão interrompida.");
+            console.error(e);
+            setError("Falha na conexão de voz.");
           },
         },
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          tools: [{ functionDeclarations: [{
-            name: "consultarEstoqueInterno",
-            parameters: {
-              type: Type.OBJECT,
-              properties: { termo: { type: Type.STRING } },
-              required: ["termo"]
-            }
-          }] }],
-          systemInstruction: `VOCÊ É O NOBELINO EM MODO VOZ. Responda rápido e com entusiasmo.`
+          systemInstruction: `VOCÊ É O NOBELINO. Comece cumprimentando o vendedor com "Olá! Nobelino no balcão!". Seja prestativo, use uma voz amigável e entusiasmada.`
         }
       });
 
       sessionRef.current = await sessionPromise;
     } catch (err: any) {
-      console.error(err);
       setError(err.message);
-      setIsActive(false);
     }
   };
 
   const stopSession = async () => {
-    if (isClosingRef.current) return;
     isClosingRef.current = true;
-
-    if (sessionRef.current) {
-      try { sessionRef.current.close(); } catch(e) {}
-      sessionRef.current = null;
-    }
-
-    const closeContext = async (ref: React.MutableRefObject<AudioContext | null>) => {
-      if (ref.current && ref.current.state !== 'closed') {
-        try {
-          await ref.current.close();
-        } catch (e) {
-          console.warn("Erro ao fechar AudioContext:", e);
-        }
-      }
-      ref.current = null;
-    };
-
-    await closeContext(audioContextRef);
-    await closeContext(outputAudioContextRef);
-
+    if (sessionRef.current) sessionRef.current.close();
+    if (audioContextRef.current) audioContextRef.current.close();
+    if (outputAudioContextRef.current) outputAudioContextRef.current.close();
     setIsActive(false);
     setIsListening(false);
     setIsSpeaking(false);
@@ -208,54 +155,27 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 transition-all">
+    <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8">
       <div className="absolute top-8 right-8">
-        <button onClick={onClose} className="w-16 h-16 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full flex items-center justify-center text-xl transition-all shadow-xl active:scale-90 border border-zinc-700">✕</button>
+        <button onClick={onClose} className="w-16 h-16 bg-zinc-800 text-white rounded-full flex items-center justify-center text-xl">✕</button>
       </div>
 
-      <div className="relative mb-16 group">
-        {!error && (isListening || isSpeaking) && (
-          <>
-            <div className={`absolute inset-0 rounded-full bg-yellow-400/20 animate-ping [animation-duration:2.5s] ${isSpeaking ? 'scale-[1.8]' : 'scale-110'}`}></div>
-            <div className={`absolute inset-0 rounded-full bg-yellow-400/10 animate-ping [animation-duration:3.5s] ${isSpeaking ? 'scale-[2.8]' : 'scale-125'}`}></div>
-          </>
+      <div className="relative mb-16">
+        {(isListening || isSpeaking) && (
+          <div className={`absolute inset-0 rounded-full bg-yellow-400/20 animate-ping ${isSpeaking ? 'scale-150' : 'scale-110'}`}></div>
         )}
-        <div className={`w-64 h-64 relative z-10 transition-all duration-500 ${error ? 'grayscale opacity-50 scale-90' : 'scale-110 hover:scale-125'}`}>
-          <Mascot 
-            animated={!error && isListening} 
-            talking={!error && isSpeaking} 
-            className="w-full h-full" 
-          />
+        <div className="w-64 h-64 relative z-10">
+          <Mascot animated talking={isSpeaking} className="w-full h-full" />
         </div>
       </div>
 
-      <div className="text-center max-w-3xl space-y-8">
-        <div className="space-y-2">
-          <h2 className={`font-black text-[10px] uppercase tracking-[0.6em] transition-colors ${error ? 'text-red-500' : 'text-yellow-400'}`}>
-            {error ? 'SISTEMA INTERROMPIDO' : isSpeaking ? 'NOBELINO RESPONDENDO' : isListening ? 'OUVINDO ATENTAMENTE' : 'CONECTANDO...'}
-          </h2>
-          <div className="h-1 w-20 bg-yellow-400 mx-auto rounded-full overflow-hidden">
-             {(isListening || isSpeaking) && <div className="h-full bg-white animate-[shimmer_2s_infinite]"></div>}
-          </div>
-        </div>
-        
-        <div className="min-h-[140px] flex flex-col items-center justify-center px-6">
-           {error ? (
-             <div className="space-y-6">
-               <p className="text-zinc-400 text-lg font-bold">"{error}"</p>
-               <button 
-                 onClick={startSession}
-                 className="bg-white text-black px-10 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-yellow-400 transition-all shadow-2xl"
-               >
-                 REINICIAR VOZ
-               </button>
-             </div>
-           ) : (
-             <p className="text-zinc-100 text-2xl font-bold italic animate-in fade-in slide-in-from-bottom-4 leading-relaxed max-w-xl">
-               {transcript || "Pode perguntar sobre qualquer livro..."}
-             </p>
-           )}
-        </div>
+      <div className="text-center max-w-3xl space-y-4">
+        <h2 className={`font-black text-xs uppercase tracking-[0.5em] ${error ? 'text-red-500' : 'text-yellow-400'}`}>
+          {error ? 'ERRO DE VOZ' : isSpeaking ? 'NOBELINO FALANDO' : 'OUVINDO...'}
+        </h2>
+        <p className="text-zinc-100 text-2xl font-bold italic h-20 overflow-hidden">
+          {transcript || "Nobelino está pronto para ouvir..."}
+        </p>
       </div>
     </div>
   );

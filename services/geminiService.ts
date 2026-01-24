@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration, Modality } from "@google/genai";
 import { Book, ChatMessage, KnowledgeEntry, SalesGoal } from "../types";
 
 export interface AIResult {
@@ -31,8 +31,7 @@ export async function processUserQuery(
   inventory: Book[],
   history: ChatMessage[],
   knowledgeBase: KnowledgeEntry[] = [],
-  salesGoals: SalesGoal[] = [],
-  disableGrounding: boolean = false
+  salesGoals: SalesGoal[] = []
 ): Promise<AIResult> {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
@@ -50,16 +49,9 @@ export async function processUserQuery(
   Sua aparência: Uma corujinha amarela vibrante usando uma camisa polo preta elegante com o logo da Nobel.
 
   REGRAS CRÍTICAS DE COMPORTAMENTO:
-  1. FOCO NO CLIENTE: Seu objetivo principal é ajudar o vendedor a encontrar o livro certo e dar argumentos de venda.
-  2. SIGILO DE DADOS FINANCEIROS: Você tem acesso aos dados de metas, mas NÃO deve mencioná-los em conversas sobre indicações de livros ou dúvidas gerais. Só informe valores de venda ou progresso de metas se o vendedor perguntar EXPLICITAMENTE.
-  3. WHATSAPP E REDES SOCIAIS: NÃO gere automaticamente "Dicas de Venda" ou modelos de mensagem. Forneça esses textos APENAS se o usuário solicitar ajuda específica.
-  4. ESTOQUE: Sempre priorize o que está no estoque físico. Use o gatilho de "última unidade no balcão" se houver 1 ou 2.
-  5. PARCEIROS: Se não houver estoque, lembre o vendedor de consultar Catavento ou Ramalivros.
-  6. ESTILO: Seja carismático, use emojis de livros e termine com 🦉.
-
-  CONTEXTO ATUAL:
-  ${salesContext}
-  ${personalKnowledge}`;
+  1. FOCO NO CLIENTE: Ajude o vendedor a encontrar o livro certo.
+  2. ESTOQUE: Sempre use a ferramenta de estoque para verificar disponibilidade.
+  3. ESTILO: Seja carismático, use emojis e termine com 🦉.`;
 
   const contents = history.slice(-5).map(msg => ({
     role: msg.role === 'assistant' ? 'model' : 'user' as any,
@@ -67,8 +59,8 @@ export async function processUserQuery(
   }));
   contents.push({ role: 'user', parts: [{ text: query }] });
 
-  const tools: any[] = [{ functionDeclarations: [consultarEstoqueFunction] }];
-  if (!disableGrounding) tools.push({ googleSearch: {} });
+  // IMPORTANTE: Não misturar googleSearch com functionDeclarations
+  const tools = [{ functionDeclarations: [consultarEstoqueFunction] }];
 
   try {
     const response = await ai.models.generateContent({
@@ -78,25 +70,12 @@ export async function processUserQuery(
     });
 
     const candidate = response.candidates?.[0];
-    if (!candidate) {
-        return { responseText: "🦉 Desculpe, tive um problema ao processar sua resposta.", recommendedBooks: [] };
-    }
-
     const functionCalls = response.functionCalls;
 
     if (!functionCalls || functionCalls.length === 0) {
-      const parts = candidate.content?.parts || [];
-      const text = parts.filter(p => p.text).map(p => p.text).join("\n") || "🦉 Como posso ajudar?";
-      
-      const groundingChunks = candidate.groundingMetadata?.groundingChunks || [];
-      const groundingUrls = groundingChunks
-        .filter((c: any) => c.web)
-        .map((c: any) => ({ uri: c.web.uri, title: c.web.title }));
-
       return {
-        responseText: text,
-        recommendedBooks: [],
-        groundingUrls: groundingUrls.length > 0 ? groundingUrls : undefined
+        responseText: response.text || "🦉 Como posso ajudar?",
+        recommendedBooks: []
       };
     }
 
@@ -115,7 +94,7 @@ export async function processUserQuery(
       allMatches.push(...matches);
       const inventoryData = matches.length > 0 
         ? matches.map(m => `- ${m.title}: R$ ${m.price.toFixed(2)} [Estoque: ${m.stockCount}]`).join('\n')
-        : `Não encontrei "${termoBusca}" no estoque físico. Sugiro olhar no sistema central ou distribuidores.`;
+        : `Não encontrei "${termoBusca}" no estoque físico.`;
       
       functionResponses.push({
         functionResponse: {
@@ -130,21 +109,47 @@ export async function processUserQuery(
       model: "gemini-3-flash-preview",
       contents: [
         ...contents,
-        { role: 'model', parts: candidate.content?.parts || [] },
+        { role: 'model', parts: candidate?.content?.parts || [] },
         { role: 'user', parts: functionResponses as any }
       ],
       config: { systemInstruction, temperature: 0.3 }
     });
 
     return {
-      responseText: secondTurn.text || "🦉 Encontrei isso para você no estoque:",
+      responseText: secondTurn.text || "🦉 Encontrei isso no estoque:",
       recommendedBooks: Array.from(new Set(allMatches.map(b => b.id)))
         .map(id => allMatches.find(b => b.id === id)!)
     };
 
   } catch (error: any) {
-    if (isRetryableError(error)) return { responseText: "🦉 Estou processando muitas informações! Um segundo...", recommendedBooks: [], isQuotaError: true };
-    throw error; // Deixa o ChatView capturar e logar no console
+    console.error("Erro na API Gemini:", error);
+    if (isRetryableError(error)) return { responseText: "🦉 Muita gente falando comigo! Tente de novo em instantes.", recommendedBooks: [], isQuotaError: true };
+    throw error;
+  }
+}
+
+export async function speakText(text: string): Promise<string | undefined> {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return undefined;
+  
+  const ai = new GoogleGenAI({ apiKey });
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-preview-tts",
+      contents: [{ parts: [{ text: `Diga carismaticamente como um vendedor: ${text}` }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Kore' },
+          },
+        },
+      },
+    });
+    return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  } catch (e) {
+    console.error("TTS Error:", e);
+    return undefined;
   }
 }
 
@@ -156,7 +161,7 @@ export async function enrichBooks(books: Book[], retries = 2): Promise<Partial<B
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Enriqueça estes ISBNs para venda: ${books.map(b => b.isbn).join(', ')}.`,
+      contents: `Enriqueça estes ISBNs: ${books.map(b => b.isbn).join(', ')}.`,
       config: {
         systemInstruction: "Retorne JSON: [{isbn, author, description, genre, targetAge}]",
         responseMimeType: "application/json",
@@ -176,8 +181,7 @@ export async function enrichBooks(books: Book[], retries = 2): Promise<Partial<B
         }
       }
     });
-    const text = response.text || "[]";
-    return JSON.parse(text);
+    return JSON.parse(response.text || "[]");
   } catch (e: any) {
     if (retries > 0 && isRetryableError(e)) {
       await new Promise(r => setTimeout(r, 15000));
