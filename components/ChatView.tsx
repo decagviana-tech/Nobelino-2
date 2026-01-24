@@ -10,6 +10,7 @@ const ChatView: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inventory, setInventory] = useState<Book[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
+  const [salesGoals, setSalesGoals] = useState<SalesGoal[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
@@ -21,26 +22,31 @@ const ChatView: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const hist = await db.get('nobel_chat_history');
-        const savedInventory = await db.get('nobel_inventory');
-        const savedKnowledge = await db.get('nobel_knowledge_base') || [];
-        
-        setInventory(savedInventory || INITIAL_INVENTORY);
-        setKnowledge(savedKnowledge);
-        
-        if (hist && hist.length > 0) {
-          setMessages(hist);
-        } else {
-          resetChat();
-        }
-      } catch (e) {
+  const load = async () => {
+    try {
+      const hist = await db.get('nobel_chat_history');
+      const savedInventory = await db.get('nobel_inventory');
+      const savedKnowledge = await db.get('nobel_knowledge_base') || [];
+      const savedGoals = await db.get('nobel_sales_goals') || [];
+      
+      setInventory(savedInventory || INITIAL_INVENTORY);
+      setKnowledge(savedKnowledge);
+      setSalesGoals(savedGoals);
+      
+      if (hist && hist.length > 0) {
+        setMessages(hist);
+      } else {
         resetChat();
       }
-    };
+    } catch (e) {
+      resetChat();
+    }
+  };
+
+  useEffect(() => {
     load();
+    window.addEventListener('nobel_usage_updated', load);
+    return () => window.removeEventListener('nobel_usage_updated', load);
   }, []);
 
   useEffect(() => {
@@ -122,10 +128,17 @@ const ChatView: React.FC = () => {
       };
       const updated = [newEntry, ...current];
       await db.save('nobel_knowledge_base', updated);
-      alert("🧠 Nobelino memorizou essa instrução nas Regras Comerciais!");
+      alert("🧠 Nobelino memorizou essa instrução!");
     } catch (e) {
-      console.error("Erro ao salvar regra:", e);
+      console.error(e);
     }
+  };
+
+  const openDistributor = (dist: 'catavento' | 'ramalivros', query: string) => {
+    const url = dist === 'catavento' 
+      ? `https://www.cataventobr.com.br/busca?q=${encodeURIComponent(query)}`
+      : `https://www.ramalivros.com.br/busca?q=${encodeURIComponent(query)}`;
+    window.open(url, '_blank');
   };
 
   const handleSend = async () => {
@@ -140,7 +153,7 @@ const ChatView: React.FC = () => {
     setHasConnectionError(false);
 
     try {
-      const result = await processUserQuery(trimmedInput, inventory, messages, knowledge);
+      const result = await processUserQuery(trimmedInput, inventory, messages, knowledge, salesGoals);
       
       if (result.isQuotaError) {
         setQuotaCooldown(60);
@@ -158,11 +171,10 @@ const ChatView: React.FC = () => {
         if (autoVoice) playResponse(assistantMsg.content);
       }
     } catch (e: any) {
-      console.error("Chat Error:", e);
       setHasConnectionError(true);
       const errorMsg: ChatMessage = { 
         role: 'assistant', 
-        content: `🦉 Opa! Perdi a conexão com meu cérebro central. Pode perguntar de novo?`, 
+        content: `🦉 Opa! Perdi a conexão. Pode repetir?`, 
         timestamp: new Date() 
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -178,16 +190,16 @@ const ChatView: React.FC = () => {
        <header className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50 backdrop-blur-md sticky top-0 z-10">
           <div className="flex items-center gap-3">
              <div className="w-12 h-12">
-                <Mascot animated={isLoading || currentMood === 'success'} talking={isLoading || isSpeaking} mood={currentMood} />
+                <Mascot animated={isLoading} talking={isLoading || isSpeaking} mood={currentMood} />
              </div>
              <div>
-                <h2 className="text-sm font-black uppercase tracking-widest text-zinc-100">Consultor Nobelino</h2>
+                <h2 className="text-sm font-black uppercase tracking-widest text-zinc-100">Nobelino Balcão</h2>
                 <div className="flex items-center gap-2 mt-1">
                    <button 
                      onClick={() => setAutoVoice(!autoVoice)}
                      className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${autoVoice ? 'bg-yellow-400 border-yellow-400 text-black' : 'border-zinc-800 text-zinc-600'}`}
                    >
-                     {autoVoice ? 'Auto-Voz ON' : 'Auto-Voz OFF'}
+                     {autoVoice ? 'Voz ON' : 'Voz OFF'}
                    </button>
                 </div>
              </div>
@@ -197,9 +209,9 @@ const ChatView: React.FC = () => {
             <button 
               onClick={() => setIsVoiceActive(true)} 
               disabled={quotaCooldown > 0}
-              className={`bg-yellow-400 text-black px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-xl shadow-yellow-400/20 active:scale-95 ${quotaCooldown > 0 ? 'opacity-20' : ''}`}
+              className={`bg-yellow-400 text-black px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-xl shadow-yellow-400/20 ${quotaCooldown > 0 ? 'opacity-20' : ''}`}
             >
-              🎙️ ATENDER VIA VOZ
+              🎙️ VOZ
             </button>
           </div>
        </header>
@@ -210,36 +222,51 @@ const ChatView: React.FC = () => {
               <div className={`max-w-[85%] p-6 rounded-[32px] text-sm shadow-2xl relative transition-all ${m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800'}`}>
                 {m.role === 'assistant' && (
                   <div className="absolute -right-12 top-2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={() => playResponse(m.content)}
-                      className="p-2 bg-zinc-800 rounded-full text-lg hover:bg-zinc-700 transition-colors shadow-lg"
-                      title="Ouvir resposta"
-                    >
-                      🔊
-                    </button>
-                    <button 
-                      onClick={() => handleSaveToKnowledge(m.content)}
-                      className="p-2 bg-zinc-800 rounded-full text-lg hover:bg-zinc-700 transition-colors shadow-lg"
-                      title="Memorizar como Regra"
-                    >
-                      🧠
-                    </button>
+                    <button onClick={() => playResponse(m.content)} className="p-2 bg-zinc-800 rounded-full text-lg shadow-lg">🔊</button>
+                    <button onClick={() => handleSaveToKnowledge(m.content)} className="p-2 bg-zinc-800 rounded-full text-lg shadow-lg">🧠</button>
                   </div>
                 )}
                 {(m.content || "").split('\n').map((line, idx) => (
                   <p key={idx} className="mb-3">{line}</p>
                 ))}
+
+                {m.groundingUrls && m.groundingUrls.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-zinc-800 space-y-2">
+                    <p className="text-[9px] font-black text-zinc-600 uppercase">Fontes Externas:</p>
+                    {m.groundingUrls.map((g, idx) => (
+                      <a key={idx} href={g.uri} target="_blank" rel="noreferrer" className="block text-[10px] text-blue-400 hover:underline truncate">🔗 {g.title}</a>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {m.suggestedBooks && m.suggestedBooks.length > 0 && (
                 <div className="mt-6 w-full flex gap-5 overflow-x-auto pb-6 snap-x custom-scrollbar">
                   {m.suggestedBooks.map(book => (
-                    <div key={book.id} className="min-w-[280px] bg-zinc-900 border border-zinc-800 p-6 rounded-[40px] snap-start relative group/card hover:border-yellow-400/50 transition-all">
-                      <h4 className="font-black text-white text-lg leading-tight mb-1 line-clamp-1">{book.title}</h4>
+                    <div key={book.id} className="min-w-[300px] bg-zinc-900 border border-zinc-800 p-6 rounded-[40px] snap-start relative group/card">
+                      <h4 className="font-black text-white text-lg leading-tight mb-1">{book.title}</h4>
                       <p className="text-[10px] font-black text-zinc-500 uppercase mb-4">{book.author}</p>
-                      <div className="flex justify-between items-end">
-                         <p className="font-black text-xl text-yellow-400">R$ {book.price.toFixed(2)}</p>
-                         <p className="text-[9px] font-bold text-zinc-600 uppercase">{book.stockCount} UN</p>
+                      
+                      <div className="flex justify-between items-center mb-6">
+                         <div>
+                            <p className="font-black text-xl text-yellow-400">R$ {book.price.toFixed(2)}</p>
+                            <p className={`text-[9px] font-black uppercase ${book.stockCount > 0 ? 'text-zinc-600' : 'text-red-500'}`}>{book.stockCount > 0 ? `${book.stockCount} UN EM ESTOQUE` : 'ESTOQUE ZERADO'}</p>
+                         </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                         <button 
+                           onClick={() => openDistributor('catavento', book.isbn || book.title)}
+                           className="flex-1 bg-zinc-950 border border-zinc-800 py-3 rounded-2xl text-[9px] font-black uppercase text-blue-400 hover:border-blue-500 transition-all"
+                         >
+                           🔍 Catavento
+                         </button>
+                         <button 
+                           onClick={() => openDistributor('ramalivros', book.isbn || book.title)}
+                           className="flex-1 bg-zinc-950 border border-zinc-800 py-3 rounded-2xl text-[9px] font-black uppercase text-pink-400 hover:border-pink-500 transition-all"
+                         >
+                           🔍 Ramalivros
+                         </button>
                       </div>
                     </div>
                   ))}
@@ -250,7 +277,7 @@ const ChatView: React.FC = () => {
          {isLoading && (
            <div className="flex items-start w-full animate-pulse">
               <div className="bg-zinc-900 text-zinc-500 p-6 rounded-[32px] text-xs font-black uppercase tracking-widest border border-zinc-800">
-                🦉 Nobelino está pensando...
+                🦉 Pesquisando no acervo e na web...
               </div>
            </div>
          )}
@@ -263,16 +290,16 @@ const ChatView: React.FC = () => {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSend()}
-                placeholder="Como posso te ajudar a vender?"
-                className={`flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-8 py-5 focus:outline-none transition-all text-sm text-white shadow-inner focus:border-yellow-400`}
+                placeholder="ISBN, Título ou Dúvida de Venda..."
+                className={`flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-8 py-5 focus:outline-none transition-all text-sm text-white focus:border-yellow-400`}
                 disabled={isLoading || quotaCooldown > 0}
              />
              <button 
                onClick={handleSend} 
                disabled={isLoading || !input.trim() || quotaCooldown > 0}
-               className="bg-yellow-400 text-black px-10 rounded-2xl font-black uppercase text-[12px] tracking-widest hover:scale-105 transition-all shadow-xl shadow-yellow-400/20 active:scale-95 disabled:opacity-30"
+               className="bg-yellow-400 text-black px-10 rounded-2xl font-black uppercase text-[12px] tracking-widest shadow-xl shadow-yellow-400/20 active:scale-95"
              >
-               VENDER
+               BUSCAR
              </button>
           </div>
        </div>

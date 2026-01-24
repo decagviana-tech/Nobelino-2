@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Book, UsageMetrics } from '../types';
 import { INITIAL_INVENTORY } from '../data/mockInventory';
@@ -59,22 +58,61 @@ const InventoryManager: React.FC = () => {
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(firstSheet) as any[];
+        
+        // Lendo como matriz de arrays para detecção manual de colunas (mais robusto)
+        const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
+        if (!rows || rows.length === 0) throw new Error("Arquivo vazio.");
 
-        const incomingData = rows.map(row => {
-          const isbn = String(row.ISBN || row.isbn || row.EAN || row.ean || row['Código de Barras'] || row.CODIGO || '').trim();
-          const title = row.Titulo || row.Título || row.title || row.NOME || row.Nome;
-          const author = row.Autor || row.author || row.AUTOR;
-          const price = row.Preco || row.Preço || row.price || row.VALOR ? parseFloat(String(row.Preco || row.Preço || row.price || row.VALOR).replace(',', '.')) : undefined;
-          const stock = row.Estoque || row.estoque || row.stock || row.QTD || row.Quantidade ? parseInt(String(row.Estoque || row.estoque || row.stock || row.QTD || row.Quantidade)) : undefined;
-          const description = row.Descricao || row.Descrição || row.description || row.SINOPSE || row.Sinopse;
-          const genre = row.Genero || row.Gênero || row.genre || row.CATEGORIA || row.Categoria;
+        // Busca o cabeçalho nas primeiras 10 linhas
+        let headerIdx = -1;
+        let colMap = { isbn: -1, title: -1, author: -1, price: -1, stock: -1, desc: -1, genre: -1 };
 
-          return { isbn, title, author, price, stockCount: stock, description, genre };
-        }).filter(u => u.isbn);
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          const row = rows[i].map(c => String(c || '').toLowerCase().trim());
+          const foundIsbn = row.findIndex(c => ['isbn', 'ean', 'barras', 'código', 'codigo', 'cod'].some(k => c.includes(k)));
+          if (foundIsbn !== -1) {
+            headerIdx = i;
+            colMap.isbn = foundIsbn;
+            colMap.title = row.findIndex(c => ['titulo', 'título', 'nome', 'descricao', 'descrição'].some(k => c.includes(k) && !c.includes('longa')));
+            colMap.author = row.findIndex(c => ['autor'].some(k => c.includes(k)));
+            colMap.price = row.findIndex(c => ['preco', 'preço', 'valor', 'venda'].some(k => c.includes(k)));
+            colMap.stock = row.findIndex(c => ['estoque', 'stock', 'qtd', 'quantidade'].some(k => c.includes(k)));
+            colMap.desc = row.findIndex(c => ['sinopse', 'resumo', 'longa'].some(k => c.includes(k)));
+            colMap.genre = row.findIndex(c => ['genero', 'gênero', 'categoria'].some(k => c.includes(k)));
+            break;
+          }
+        }
+
+        if (headerIdx === -1 || colMap.isbn === -1) {
+          alert("Não consegui encontrar a coluna de ISBN ou Código de Barras na sua planilha. Verifique o cabeçalho.");
+          return;
+        }
+
+        const incomingData = rows.slice(headerIdx + 1).map(row => {
+          const isbnVal = row[colMap.isbn];
+          if (!isbnVal) return null;
+
+          // Limpeza do ISBN (remove notação científica se houver)
+          let isbn = String(isbnVal).trim();
+          if (isbn.includes('E+')) isbn = Number(isbnVal).toLocaleString('fullwide', {useGrouping:false});
+          isbn = isbn.replace(/\D/g, '');
+
+          const priceVal = colMap.price !== -1 ? String(row[colMap.price] || '').replace(',', '.') : undefined;
+          const stockVal = colMap.stock !== -1 ? String(row[colMap.stock] || '') : undefined;
+
+          return {
+            isbn,
+            title: colMap.title !== -1 ? row[colMap.title] : undefined,
+            author: colMap.author !== -1 ? row[colMap.author] : undefined,
+            price: priceVal ? parseFloat(priceVal) : undefined,
+            stockCount: stockVal ? parseInt(stockVal) : undefined,
+            description: colMap.desc !== -1 ? row[colMap.desc] : undefined,
+            genre: colMap.genre !== -1 ? row[colMap.genre] : undefined
+          };
+        }).filter(item => item !== null && item.isbn.length > 5);
 
         if (incomingData.length === 0) {
-          alert("Nenhum dado válido encontrado. Certifique-se de que a planilha tem a coluna 'ISBN'.");
+          alert("Nenhum dado válido encontrado após o cabeçalho. Verifique se os ISBNs estão na coluna correta.");
           return;
         }
 
@@ -83,7 +121,8 @@ const InventoryManager: React.FC = () => {
         setBooks(refreshed);
         alert(`🦉 Sincronização Master Concluída!\n\n📈 Livros Atualizados: ${result.updatedCount}\n✨ Novos Livros: ${result.addedCount}`);
       } catch (err) {
-        alert("Erro ao processar planilha. Verifique o formato do arquivo.");
+        console.error(err);
+        alert("Erro ao processar planilha. Verifique se o arquivo está no formato correto.");
       }
     };
     reader.readAsArrayBuffer(file);
