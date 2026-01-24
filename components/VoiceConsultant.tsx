@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type } from '@google/genai';
 import { Book, KnowledgeEntry } from '../types';
@@ -97,7 +96,7 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
               setTranscript(prev => prev + " " + (message.serverContent?.outputTranscription?.text || ''));
             }
             
-            const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+            const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audioData && outputAudioContextRef.current && outputAudioContextRef.current.state !== 'closed') {
               setIsSpeaking(true);
               const ctx = outputAudioContextRef.current;
@@ -123,9 +122,11 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
             }
             
             if (message.toolCall) {
-              for (const fc of message.toolCall.functionCalls) {
+              const calls = message.toolCall.functionCalls || [];
+              for (const fc of calls) {
                 if (fc.name === 'consultarEstoqueInterno') {
-                  const termo = String((fc.args as any).termo || '').toLowerCase();
+                  const args = fc.args as any;
+                  const termo = String(args.termo || '').toLowerCase();
                   const matches = inventory.filter(b => 
                     b.title.toLowerCase().includes(termo) || 
                     b.isbn.includes(termo)

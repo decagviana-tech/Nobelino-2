@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { Book, ChatMessage, KnowledgeEntry, SalesGoal } from "../types";
 
@@ -74,18 +73,25 @@ export async function processUserQuery(
     });
 
     const candidate = response.candidates?.[0];
+    if (!candidate) {
+        return { responseText: "🦉 Desculpe, tive um problema ao processar sua resposta.", recommendedBooks: [] };
+    }
+
     const functionCalls = response.functionCalls;
 
     if (!functionCalls || functionCalls.length === 0) {
-      const parts = candidate?.content?.parts || [];
+      const parts = candidate.content?.parts || [];
       const text = parts.filter(p => p.text).map(p => p.text).join("\n") || "🦉 Como posso ajudar?";
       
+      const groundingChunks = candidate.groundingMetadata?.groundingChunks || [];
+      const groundingUrls = groundingChunks
+        .filter((c: any) => c.web)
+        .map((c: any) => ({ uri: c.web.uri, title: c.web.title }));
+
       return {
         responseText: text,
         recommendedBooks: [],
-        groundingUrls: (candidate?.groundingMetadata?.groundingChunks || [])
-          .filter((c: any) => c.web)
-          .map((c: any) => ({ uri: c.web.uri, title: c.web.title }))
+        groundingUrls: groundingUrls.length > 0 ? groundingUrls : undefined
       };
     }
 
@@ -93,7 +99,8 @@ export async function processUserQuery(
     const allMatches: Book[] = [];
 
     for (const fc of functionCalls) {
-      const termoBusca = String(fc.args.termo || "").toLowerCase();
+      const args = fc.args as any;
+      const termoBusca = String(args.termo || "").toLowerCase();
       const matches = inventory.filter(b => 
         b.title.toLowerCase().includes(termoBusca) || 
         b.isbn.includes(termoBusca) || 
@@ -118,7 +125,7 @@ export async function processUserQuery(
       model: "gemini-3-flash-preview",
       contents: [
         ...contents,
-        { role: 'model', parts: candidate?.content?.parts || [] },
+        { role: 'model', parts: candidate.content?.parts || [] },
         { role: 'user', parts: functionResponses as any }
       ],
       config: { systemInstruction, temperature: 0.3 }
@@ -161,7 +168,8 @@ export async function enrichBooks(books: Book[], retries = 2): Promise<Partial<B
         }
       }
     });
-    return JSON.parse(response.text || "[]");
+    const text = response.text || "[]";
+    return JSON.parse(text);
   } catch (e: any) {
     if (retries > 0 && isRetryableError(e)) {
       await new Promise(r => setTimeout(r, 15000));
