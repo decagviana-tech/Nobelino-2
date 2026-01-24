@@ -31,8 +31,11 @@ const ChatView: React.FC = () => {
         setInventory(savedInventory || INITIAL_INVENTORY);
         setKnowledge(savedKnowledge);
         
-        if (hist && hist.length > 0) setMessages(hist);
-        else resetChat();
+        if (hist && hist.length > 0) {
+          setMessages(hist);
+        } else {
+          resetChat();
+        }
       } catch (e) {
         resetChat();
       }
@@ -83,7 +86,7 @@ const ChatView: React.FC = () => {
   };
 
   const playResponse = async (text: string) => {
-    if (isSpeaking) return;
+    if (isSpeaking || !text) return;
     setIsSpeaking(true);
     try {
       if (!audioContextRef.current) {
@@ -103,7 +106,6 @@ const ChatView: React.FC = () => {
         setIsSpeaking(false);
       }
     } catch (e) {
-      console.error("Erro ao reproduzir áudio:", e);
       setIsSpeaking(false);
     }
   };
@@ -113,7 +115,8 @@ const ChatView: React.FC = () => {
     if (!trimmedInput || isLoading || quotaCooldown > 0) return;
     
     const userMsg: ChatMessage = { role: 'user', content: trimmedInput, timestamp: new Date() };
-    setMessages(prev => [...prev, userMsg]);
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
     setInput('');
     setIsLoading(true);
     setHasConnectionError(false);
@@ -126,21 +129,22 @@ const ChatView: React.FC = () => {
       } else {
         const assistantMsg: ChatMessage = { 
           role: 'assistant', 
-          content: result.responseText, 
+          content: result.responseText || "🦉 Conectado!", 
           timestamp: new Date(),
           suggestedBooks: result.recommendedBooks,
           groundingUrls: result.groundingUrls
         };
-        setMessages(prev => [...prev, assistantMsg]);
-        await db.save('nobel_chat_history', [...messages, userMsg, assistantMsg]);
-        if (autoVoice) playResponse(result.responseText);
+        const finalHistory = [...newMessages, assistantMsg];
+        setMessages(finalHistory);
+        await db.save('nobel_chat_history', finalHistory);
+        if (autoVoice) playResponse(assistantMsg.content);
       }
     } catch (e: any) {
-      console.error("Erro no Chat:", e);
+      console.error("Chat Error:", e);
       setHasConnectionError(true);
       const errorMsg: ChatMessage = { 
         role: 'assistant', 
-        content: `🦉 Desculpe, tive um problema técnico: ${e.message || 'Erro de conexão'}.`, 
+        content: `🦉 Opa! Perdi a conexão com meu cérebro central. Pode perguntar de novo?`, 
         timestamp: new Date() 
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -190,6 +194,7 @@ const ChatView: React.FC = () => {
                   <button 
                     onClick={() => playResponse(m.content)}
                     className="absolute -right-12 top-2 p-2 bg-zinc-800 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-lg"
+                    title="Ouvir resposta"
                   >
                     🔊
                   </button>
