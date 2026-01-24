@@ -110,6 +110,24 @@ const ChatView: React.FC = () => {
     }
   };
 
+  const handleSaveToKnowledge = async (text: string) => {
+    try {
+      const current = await db.get('nobel_knowledge_base') || [];
+      const newEntry: KnowledgeEntry = {
+        id: Date.now().toString(),
+        topic: "Sugestão Nobelino",
+        content: text,
+        type: 'rule',
+        active: true
+      };
+      const updated = [newEntry, ...current];
+      await db.save('nobel_knowledge_base', updated);
+      alert("🧠 Nobelino memorizou essa instrução nas Regras Comerciais!");
+    } catch (e) {
+      console.error("Erro ao salvar regra:", e);
+    }
+  };
+
   const handleSend = async () => {
     const trimmedInput = input.trim();
     if (!trimmedInput || isLoading || quotaCooldown > 0) return;
@@ -191,13 +209,22 @@ const ChatView: React.FC = () => {
            <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} w-full animate-in fade-in slide-in-from-bottom-4 group`}>
               <div className={`max-w-[85%] p-6 rounded-[32px] text-sm shadow-2xl relative transition-all ${m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800'}`}>
                 {m.role === 'assistant' && (
-                  <button 
-                    onClick={() => playResponse(m.content)}
-                    className="absolute -right-12 top-2 p-2 bg-zinc-800 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-lg"
-                    title="Ouvir resposta"
-                  >
-                    🔊
-                  </button>
+                  <div className="absolute -right-12 top-2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => playResponse(m.content)}
+                      className="p-2 bg-zinc-800 rounded-full text-lg hover:bg-zinc-700 transition-colors shadow-lg"
+                      title="Ouvir resposta"
+                    >
+                      🔊
+                    </button>
+                    <button 
+                      onClick={() => handleSaveToKnowledge(m.content)}
+                      className="p-2 bg-zinc-800 rounded-full text-lg hover:bg-zinc-700 transition-colors shadow-lg"
+                      title="Memorizar como Regra"
+                    >
+                      🧠
+                    </button>
+                  </div>
                 )}
                 {(m.content || "").split('\n').map((line, idx) => (
                   <p key={idx} className="mb-3">{line}</p>
