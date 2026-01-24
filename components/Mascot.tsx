@@ -1,16 +1,15 @@
-
 import React from 'react';
 
 interface MascotProps {
   className?: string;
   animated?: boolean;
   talking?: boolean;
-  mood?: 'happy' | 'thinking' | 'surprised' | 'tired';
+  mood?: 'happy' | 'thinking' | 'surprised' | 'tired' | 'success';
 }
 
 const Mascot: React.FC<MascotProps> = ({ className, animated = false, talking = false, mood = 'happy' }) => {
   return (
-    <div className={`${className} flex items-center justify-center select-none ${animated && mood !== 'tired' ? 'animate-float' : ''} transition-all duration-500`}>
+    <div className={`${className} flex items-center justify-center select-none ${animated && mood !== 'tired' ? 'animate-float' : ''} ${mood === 'success' ? 'animate-success' : ''} transition-all duration-500`}>
       <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full drop-shadow-2xl">
         <style>
           {`
@@ -22,12 +21,14 @@ const Mascot: React.FC<MascotProps> = ({ className, animated = false, talking = 
               0%, 100% { transform: translateY(0); }
               50% { transform: translateY(2px) scaleY(1.5); }
             }
-            @keyframes wing-flap {
-              0%, 100% { transform: rotate(0deg); }
-              50% { transform: rotate(-5deg); }
+            @keyframes star-rotate {
+              0% { transform: rotate(0deg) scale(1); }
+              50% { transform: rotate(180deg) scale(1.2); }
+              100% { transform: rotate(360deg) scale(1); }
             }
-            .eye-blink { animation: ${mood === 'tired' ? 'none' : 'blink 4s infinite'}; transform-origin: center 38px; }
+            .eye-blink { animation: ${mood === 'tired' || mood === 'success' ? 'none' : 'blink 4s infinite'}; transform-origin: center 38px; }
             .beak-talk { animation: ${talking ? 'talk 0.2s infinite' : 'none'}; transform-origin: center 44px; }
+            .star-eye { animation: star-rotate 2s infinite linear; transform-origin: center; }
           `}
         </style>
         
@@ -52,9 +53,15 @@ const Mascot: React.FC<MascotProps> = ({ className, animated = false, talking = 
         <g className="eye-blink">
           {mood === 'tired' ? (
             <>
-              {/* Olhos fechados para cansaço */}
               <path d="M30 40C30 40 34 35 38 35C42 35 46 40 46 40" stroke="#18181b" strokeWidth="2" strokeLinecap="round" />
               <path d="M54 40C54 40 58 35 62 35C66 35 70 40 70 40" stroke="#18181b" strokeWidth="2" strokeLinecap="round" />
+            </>
+          ) : mood === 'success' ? (
+            <>
+              <circle cx="38" cy="38" r="10" fill="white" />
+              <circle cx="62" cy="38" r="10" fill="white" />
+              <path d="M38 33L39.5 36.5H43L40.2 38.5L41.2 42L38 40L34.8 42L35.8 38.5L33 36.5H36.5L38 33Z" fill="#FACC15" className="star-eye" />
+              <path d="M62 33L63.5 36.5H67L64.2 38.5L65.2 42L62 40L58.8 42L59.8 38.5L57 36.5H60.5L62 33Z" fill="#FACC15" className="star-eye" />
             </>
           ) : (
             <>

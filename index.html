@@ -33,6 +33,12 @@
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+        
+        @keyframes success-glow {
+          0%, 100% { filter: drop-shadow(0 0 5px rgba(250, 204, 21, 0.2)); }
+          50% { filter: drop-shadow(0 0 20px rgba(250, 204, 21, 0.6)); }
+        }
+        .animate-success { animation: success-glow 2s infinite; }
     </style>
 <script type="importmap">
 {

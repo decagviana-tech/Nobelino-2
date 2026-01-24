@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, Book, KnowledgeEntry, SalesGoal, UsageMetrics } from '../types';
 import { INITIAL_INVENTORY } from '../data/mockInventory';
@@ -15,8 +14,8 @@ const ChatView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [quotaCooldown, setQuotaCooldown] = useState(0);
-  const [consecutiveQuotaErrors, setConsecutiveQuotaErrors] = useState(0);
-  const [brainStress, setBrainStress] = useState(0); 
+  const [hasConnectionError, setHasConnectionError] = useState(false);
+  const [currentMood, setCurrentMood] = useState<'happy' | 'thinking' | 'surprised' | 'tired' | 'success'>('happy');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,18 +39,28 @@ const ChatView: React.FC = () => {
 
   useEffect(() => {
     let timer: any;
-    if (quotaCooldown > 0) {
-      timer = setInterval(() => {
-        setQuotaCooldown(c => Math.max(0, c - 1));
-      }, 1000);
+    if (quotaCooldown > 0 || hasConnectionError) {
+      setCurrentMood('tired');
+      if (quotaCooldown > 0) {
+        timer = setInterval(() => {
+          setQuotaCooldown(c => Math.max(0, c - 1));
+        }, 1000);
+      }
+    } else if (isLoading) {
+      setCurrentMood('thinking');
+    } else if (messages.length > 0 && messages[messages.length - 1].suggestedBooks?.length) {
+      setCurrentMood('success');
+    } else {
+      setCurrentMood('happy');
     }
     return () => clearInterval(timer);
-  }, [quotaCooldown]);
+  }, [quotaCooldown, isLoading, messages, hasConnectionError]);
 
   const resetChat = async () => {
     const welcome = "🦉 Olá! Nobelino pronto para o balcão. Qual o desafio de vendas hoje?";
     const initialMsg: ChatMessage = { role: 'assistant', content: welcome, timestamp: new Date() };
     setMessages([initialMsg]);
+    setHasConnectionError(false);
     await db.save('nobel_chat_history', [initialMsg]);
   };
 
@@ -67,28 +76,7 @@ const ChatView: React.FC = () => {
     }
     await db.save('nobel_usage_metrics', metrics);
     window.dispatchEvent(new CustomEvent('nobel_usage_updated'));
-    setBrainStress(prev => Math.min(100, prev + 10));
   };
-
-  const saveAsRule = async (content: string) => {
-    const currentKnowledge = await db.get('nobel_knowledge_base') || [];
-    const newRule: KnowledgeEntry = {
-      id: Date.now().toString(),
-      topic: `Regra de Ouro (${new Date().toLocaleDateString('pt-BR')})`,
-      content: content,
-      type: 'rule',
-      active: true
-    };
-    const updated = [newRule, ...currentKnowledge];
-    await db.save('nobel_knowledge_base', updated);
-    setKnowledge(updated);
-    alert("🧠 Resposta eternizada nas Regras Comerciais!");
-  };
-
-  useEffect(() => {
-    if (messages.length > 0) db.save('nobel_chat_history', messages);
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
   const handleSend = async () => {
     const trimmedInput = input.trim();
@@ -98,6 +86,7 @@ const ChatView: React.FC = () => {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
+    setHasConnectionError(false);
 
     try {
       const latestGoals = await db.get('nobel_sales_goals') || [];
@@ -108,10 +97,7 @@ const ChatView: React.FC = () => {
       
       if (result.isQuotaError) {
         setQuotaCooldown(60);
-        setConsecutiveQuotaErrors(prev => prev + 1);
-        setBrainStress(100);
       } else {
-        setConsecutiveQuotaErrors(0);
         await incrementUsage();
         setMessages(prev => [...prev, { 
           role: 'assistant', 
@@ -122,7 +108,13 @@ const ChatView: React.FC = () => {
         }]);
       }
     } catch (e: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: '🦉 Minha conexão falhou. Vamos tentar de novo?', timestamp: new Date() }]);
+      console.error("Erro Nobelino:", e);
+      setHasConnectionError(true);
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: '🦉 Ops! Minha inteligência está desligada. Parece que a API_KEY não foi configurada no Netlify. Siga o passo a passo para me ativar!', 
+        timestamp: new Date() 
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -135,7 +127,7 @@ const ChatView: React.FC = () => {
        <header className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50 backdrop-blur-md sticky top-0 z-10">
           <div className="flex items-center gap-3">
              <div className="w-12 h-12">
-                <Mascot animated={isLoading} talking={isLoading} mood={quotaCooldown > 0 ? 'tired' : 'happy'} />
+                <Mascot animated={isLoading || currentMood === 'success'} talking={isLoading} mood={currentMood} />
              </div>
              <div>
                 <h2 className="text-sm font-black uppercase tracking-widest text-zinc-100">Consultor Nobelino</h2>
@@ -155,30 +147,30 @@ const ChatView: React.FC = () => {
        </header>
        
        <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-10 custom-scrollbar">
+         {hasConnectionError && (
+           <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-[40px] mb-8 animate-in slide-in-from-top-4">
+             <h3 className="text-red-500 font-black uppercase text-xs tracking-widest mb-4">⚠️ Falha de Configuração</h3>
+             <p className="text-zinc-400 text-sm leading-relaxed mb-6">
+               O Nobelino precisa de uma <b>API_KEY</b> para funcionar. Vá ao painel do Netlify e adicione a variável de ambiente.
+             </p>
+             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="inline-block bg-white text-black px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-yellow-400 transition-all">
+               Pegar minha Chave Grátis ↗
+             </a>
+           </div>
+         )}
+
          {messages.map((m, i) => (
            <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} w-full animate-in fade-in slide-in-from-bottom-4 group`}>
               <div className={`max-w-[85%] p-6 rounded-[32px] text-sm shadow-2xl relative transition-all ${m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800'}`}>
                 {(m.content || "").split('\n').map((line, idx) => (
                   <p key={idx} className="mb-3">{line}</p>
                 ))}
-
-                {m.role === 'assistant' && i > 0 && (
-                   <div className="absolute -bottom-4 right-6 opacity-0 group-hover:opacity-100 transition-all duration-300">
-                      <button 
-                        onClick={() => saveAsRule(m.content)}
-                        className="flex items-center gap-2 bg-zinc-950 border border-zinc-700 hover:border-blue-400 px-3 py-2 rounded-xl text-[9px] font-black text-blue-400 uppercase tracking-widest shadow-2xl"
-                      >
-                         🧠 Gravar no Cérebro
-                      </button>
-                   </div>
-                )}
               </div>
 
               {m.suggestedBooks && m.suggestedBooks.length > 0 && (
                 <div className="mt-6 w-full flex gap-5 overflow-x-auto pb-6 snap-x custom-scrollbar">
                   {m.suggestedBooks.map(book => (
                     <div key={book.id} className="min-w-[280px] bg-zinc-900 border border-zinc-800 p-6 rounded-[40px] snap-start relative overflow-hidden group/card hover:border-yellow-400/50 transition-all">
-                      {book.stockCount < 3 && <div className="absolute top-4 right-4 text-[7px] font-black bg-red-500 text-white px-2 py-1 rounded-full animate-pulse">ESTOQUE BAIXO</div>}
                       <h4 className="font-black text-white text-lg leading-tight mb-1 line-clamp-1">{book.title}</h4>
                       <p className="text-[10px] font-black text-zinc-500 uppercase mb-4">{book.author}</p>
                       <div className="flex justify-between items-end">
@@ -187,16 +179,6 @@ const ChatView: React.FC = () => {
                       </div>
                     </div>
                   ))}
-                </div>
-              )}
-
-              {m.groundingUrls && m.groundingUrls.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                   {m.groundingUrls.map((url, idx) => (
-                     <a key={idx} href={url.uri} target="_blank" rel="noreferrer" className="text-[9px] font-black text-zinc-500 uppercase bg-zinc-900 px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-700 transition-all">
-                       🔗 {url.title}
-                     </a>
-                   ))}
                 </div>
               )}
            </div>

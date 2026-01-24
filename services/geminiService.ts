@@ -34,7 +34,12 @@ export async function processUserQuery(
   salesGoals: SalesGoal[] = [],
   disableGrounding: boolean = false
 ): Promise<AIResult> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("A API_KEY não foi encontrada no ambiente.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   const today = new Date().toISOString().split('T')[0];
   const todayGoal = salesGoals.find(g => g.date === today) || { actualSales: 0, minGoal: 0, superGoal: 0 };
   
@@ -139,12 +144,15 @@ export async function processUserQuery(
 
   } catch (error: any) {
     if (isRetryableError(error)) return { responseText: "🦉 Estou processando muitas informações! Um segundo...", recommendedBooks: [], isQuotaError: true };
-    return { responseText: "🦉 Tive um pequeno problema técnico. Pode repetir?", recommendedBooks: [] };
+    throw error; // Deixa o ChatView capturar e logar no console
   }
 }
 
 export async function enrichBooks(books: Book[], retries = 2): Promise<Partial<Book>[]> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error("API_KEY ausente.");
+  
+  const ai = new GoogleGenAI({ apiKey });
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
