@@ -35,6 +35,7 @@ export interface ChatMessage {
   suggestedBooks?: Book[];
   groundingUrls?: { uri: string; title: string }[];
   advisorNotes?: string;
+  isQuotaError?: boolean;
 }
 
 export interface UsageMetrics {

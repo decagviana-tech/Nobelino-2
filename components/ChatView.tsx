@@ -17,7 +17,6 @@ const ChatView: React.FC = () => {
   const [autoVoice, setAutoVoice] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [quotaCooldown, setQuotaCooldown] = useState(0);
-  const [authError, setAuthError] = useState(false);
   const [currentMood, setCurrentMood] = useState<'happy' | 'thinking' | 'surprised' | 'tired' | 'success'>('happy');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -25,11 +24,13 @@ const ChatView: React.FC = () => {
   const load = async () => {
     const hist = await db.get('nobel_chat_history');
     const savedInventory = await db.get('nobel_inventory');
-    const savedKnowledge = await db.get('nobel_knowledge_base') || [];
-    const savedGoals = await db.get('nobel_sales_goals') || [];
+    const savedKnowledge = await db.get('nobel_knowledge_base');
+    const savedGoals = await db.get('nobel_sales_goals');
+    
     setInventory(savedInventory || INITIAL_INVENTORY);
-    setKnowledge(savedKnowledge);
-    setSalesGoals(savedGoals);
+    setKnowledge(savedKnowledge || []);
+    setSalesGoals(savedGoals || []);
+    
     if (hist && hist.length > 0) setMessages(hist);
     else resetChat();
   };
@@ -51,18 +52,15 @@ const ChatView: React.FC = () => {
       timer = setInterval(() => setQuotaCooldown(c => Math.max(0, c - 1)), 1000);
     } else if (isLoading) {
       setCurrentMood('thinking');
-    } else if (isSpeaking) {
-      setCurrentMood('happy');
     } else {
       setCurrentMood('happy');
     }
     return () => clearInterval(timer);
-  }, [quotaCooldown, isLoading, isSpeaking]);
+  }, [quotaCooldown, isLoading]);
 
   const resetChat = async () => {
     const initialMsg: ChatMessage = { role: 'assistant', content: "🦉 Nobelino no balcão! O que vamos vender hoje?", timestamp: new Date() };
     setMessages([initialMsg]);
-    setAuthError(false);
     await db.save('nobel_chat_history', [initialMsg]);
   };
 
@@ -82,7 +80,6 @@ const ChatView: React.FC = () => {
     setIsSpeaking(true);
     try {
       if (!audioContextRef.current) audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      if (audioContextRef.current.state === 'suspended') await audioContextRef.current.resume();
       const audioData = await speakText(text);
       if (audioData) {
         const buffer = await decodeAudio(audioData, audioContextRef.current);
@@ -99,6 +96,7 @@ const ChatView: React.FC = () => {
     const textToSend = overrideInput || input.trim();
     if (!textToSend || isLoading) return;
     
+    // Se for entrada manual (não override do botão retentar), adiciona ao chat
     if (!overrideInput) {
       const userMsg: ChatMessage = { role: 'user', content: textToSend, timestamp: new Date() };
       setMessages(prev => [...prev, userMsg]);
@@ -107,23 +105,34 @@ const ChatView: React.FC = () => {
     
     setIsLoading(true);
     try {
+      // Passando explicitamente o knowledge e salesGoals para o serviço
       const result = await processUserQuery(textToSend, inventory, messages, knowledge, salesGoals);
-      if (result.isQuotaError) setQuotaCooldown(30);
-      if (result.isAuthError) setAuthError(true);
+      
+      if (result.isQuotaError) {
+        setQuotaCooldown(20);
+      }
 
       const assistantMsg: ChatMessage = { 
         role: 'assistant', 
         content: result.responseText, 
         timestamp: new Date(),
         suggestedBooks: result.recommendedBooks,
-        groundingUrls: result.groundingUrls
+        groundingUrls: result.groundingUrls,
+        isQuotaError: result.isQuotaError
       };
       
-      setMessages(prev => [...prev, assistantMsg]);
-      await db.save('nobel_chat_history', [...messages, assistantMsg]);
+      const newHistory = [...messages];
+      if (!overrideInput) {
+        newHistory.push({ role: 'user', content: textToSend, timestamp: new Date() });
+      }
+      newHistory.push(assistantMsg);
+
+      setMessages(prev => [...prev.filter(m => m.role !== 'assistant' || !m.isQuotaError), assistantMsg]);
+      await db.save('nobel_chat_history', newHistory);
+      
       if (autoVoice && !result.isQuotaError) playResponse(assistantMsg.content);
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'assistant', content: "🦉 Tive um apagão. Tente de novo!", timestamp: new Date() }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: "🦉 Tive um apagão. Pode repetir?", timestamp: new Date() }]);
     } finally {
       setIsLoading(false);
     }
@@ -141,7 +150,8 @@ const ChatView: React.FC = () => {
                 <h2 className="text-sm font-black uppercase tracking-widest text-zinc-100">Nobelino Balcão</h2>
                 <div className="flex items-center gap-2 mt-1">
                    <button onClick={() => setAutoVoice(!autoVoice)} className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${autoVoice ? 'bg-yellow-400 border-yellow-400 text-black' : 'border-zinc-800 text-zinc-600'}`}>{autoVoice ? 'Voz ON' : 'Voz OFF'}</button>
-                   {quotaCooldown > 0 && <span className="text-[8px] font-black text-yellow-500 uppercase animate-pulse">● Limite Atingido ({quotaCooldown}s)</span>}
+                   {quotaCooldown > 0 && <span className="text-[8px] font-black text-yellow-500 uppercase animate-pulse">● Aguardando ({quotaCooldown}s)</span>}
+                   <span className="text-[8px] font-bold text-zinc-500 uppercase">🧠 {knowledge.length} Regras Ativas</span>
                 </div>
              </div>
           </div>
@@ -151,21 +161,33 @@ const ChatView: React.FC = () => {
        <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-10 custom-scrollbar">
          {messages.map((m, i) => (
            <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} w-full animate-in fade-in slide-in-from-bottom-4 group`}>
-              <div className={`max-w-[85%] p-6 rounded-[32px] text-sm shadow-2xl relative transition-all ${m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800'} ${m.content.includes('limite') || m.content.includes('cansaço') ? 'border-yellow-500/50 bg-yellow-500/5' : ''}`}>
+              <div className={`max-w-[85%] p-6 rounded-[32px] text-sm shadow-2xl relative transition-all ${m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800'} ${m.isQuotaError ? 'border-yellow-500/50 bg-yellow-500/5' : ''}`}>
                 {m.content.split('\n').map((line, idx) => <p key={idx} className="mb-3">{line}</p>)}
                 
-                {m.role === 'assistant' && (m.content.includes('cansaço') || m.content.includes('limite')) && (
+                {m.isQuotaError && (
                   <button 
                     onClick={() => handleSend(messages[i-1]?.content)}
-                    className="mt-2 w-full py-3 bg-yellow-400 text-black rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 active:scale-95 transition-all"
+                    className="mt-4 w-full py-4 bg-yellow-400 text-black rounded-2xl font-black text-[10px] uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-yellow-400/20"
                   >
-                    🔄 Tentar Pergunta Novamente
+                    🔄 Tentar Pergunta de Novo
                   </button>
+                )}
+
+                {m.suggestedBooks && m.suggestedBooks.length > 0 && (
+                  <div className="mt-6 flex flex-wrap gap-2">
+                    {m.suggestedBooks.map(b => (
+                      <div key={b.id} className="bg-zinc-800 p-4 rounded-2xl border border-zinc-700 min-w-[150px] max-w-[200px]">
+                        <p className="text-[10px] font-bold text-white mb-1">{b.title}</p>
+                        <p className="text-[8px] text-zinc-500 uppercase font-black">Estoque: {b.stockCount} un</p>
+                        <p className="text-[10px] text-yellow-400 font-black mt-2">R$ {b.price.toFixed(2)}</p>
+                      </div>
+                    ))}
+                  </div>
                 )}
 
                 {m.groundingUrls && m.groundingUrls.length > 0 && (
                   <div className="mt-4 pt-4 border-t border-zinc-800 space-y-2">
-                    <p className="text-[9px] font-black text-zinc-600 uppercase">Fontes:</p>
+                    <p className="text-[9px] font-black text-zinc-600 uppercase">Fontes Externas:</p>
                     {m.groundingUrls.map((g, idx) => (
                       <a key={idx} href={g.uri} target="_blank" rel="noreferrer" className="block text-[10px] text-blue-400 hover:underline truncate">🔗 {g.title}</a>
                     ))}
@@ -176,7 +198,7 @@ const ChatView: React.FC = () => {
          ))}
          {isLoading && (
            <div className="flex items-start w-full animate-pulse">
-              <div className="bg-zinc-900 text-zinc-500 p-6 rounded-[32px] text-xs font-black uppercase tracking-widest border border-zinc-800">🦉 Pensando...</div>
+              <div className="bg-zinc-900 text-zinc-500 p-6 rounded-[32px] text-xs font-black uppercase tracking-widest border border-zinc-800">🦉 Consultando Cérebro...</div>
            </div>
          )}
          <div ref={chatEndRef} />
