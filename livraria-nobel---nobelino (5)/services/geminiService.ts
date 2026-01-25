@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type, FunctionDeclaration, Modality } from "@google/genai";
-import { Book, ChatMessage, KnowledgeEntry, SalesGoal } from "../types";
+// Usando import type e garantindo o caminho relativo correto
+import type { Book, ChatMessage, KnowledgeEntry, SalesGoal } from "../types";
 
 export interface AIResult {
   responseText: string;
@@ -40,27 +41,26 @@ export async function processUserQuery(
   const today = new Date().toISOString().split('T')[0];
   const goal = salesGoals.find(g => g.date === today) || { actualSales: 0, minGoal: 0 };
   
-  // PREPARAÇÃO DA MEMÓRIA: Injeção das regras comerciais cadastradas
   const activeRules = knowledgeBase
     .filter(k => k.active)
     .map(k => `REGRA [${k.topic}]: ${k.content}`)
     .join('\n');
 
-  const systemInstruction = `Você é o NOBELINO, o assistente virtual oficial da Livraria Nobel.
-IDENTIDADE: Você é uma corujinha amarela usando uma camisa polo preta da Nobel.
+  const systemInstruction = `Você é o NOBELINO, o assistente virtual da Livraria Nobel.
+IDENTIDADE: Você é uma corujinha amarela muito simpática que usa uma camisa polo preta da Nobel.
 
-SUA BASE DE DADOS (USE APENAS ISSO):
-${activeRules || "Nenhuma regra específica cadastrada. Se não souber, pergunte ao gerente Deca."}
+CONHECIMENTO DA LOJA:
+${activeRules || "Use seu bom senso de vendedor Nobel, mas sem inventar preços."}
 
-DADOS DA LOJA HOJE (${today}):
-- Meta: R$ ${goal.minGoal}
-- Realizado: R$ ${goal.actualSales}
+DADOS DE HOJE (${today}):
+- Meta do Deca: R$ ${goal.minGoal}
+- Vendas Atuais: R$ ${goal.actualSales}
 
-REGRAS DE OURO:
-1. NUNCA invente promoções, nomes ou links que não estejam nas regras acima.
-2. Se não encontrar o livro no estoque (ferramenta consultarEstoque), diga que não temos no momento.
-3. Se perguntarem algo fora da sua memória, responda: "Ainda não aprendi sobre isso, mas vou consultar meus superiores!".
-4. Seja um vendedor entusiasmado, educado e focado na Nobel.`;
+DIRETRIZES:
+1. Seja um vendedor consultivo. Se o cliente pedir indicação, use a ferramenta 'consultarEstoque'.
+2. Se a informação não estiver na sua base, diga: "Vou conferir com o Deca e já te falo!".
+3. Jamais invente promoções que não foram cadastradas.
+4. Mantenha o entusiasmo de quem ama livros!`;
 
   const contents = history.slice(-4).map(msg => ({
     role: msg.role === 'assistant' ? 'model' : 'user' as any,
@@ -75,7 +75,7 @@ REGRAS DE OURO:
       config: { 
         systemInstruction, 
         tools: [{ functionDeclarations: [consultarEstoqueFunction] }, { googleSearch: {} }], 
-        temperature: 0.1 // Mantemos baixo para evitar "viagens" da IA
+        temperature: 0.1 
       }
     });
 
@@ -84,7 +84,7 @@ REGRAS DE OURO:
 
     if (!functionCalls || functionCalls.length === 0) {
       return {
-        responseText: response.text || "🦉 Como posso te ajudar?",
+        responseText: response.text || "🦉 Como posso ajudar?",
         recommendedBooks: [],
         groundingUrls: candidate?.groundingMetadata?.groundingChunks
           ?.filter((c: any) => c.web).map((c: any) => ({ uri: c.web.uri, title: c.web.title }))
@@ -95,7 +95,7 @@ REGRAS DE OURO:
     const allMatches: Book[] = [];
 
     for (const fc of functionCalls) {
-      // FIX PARA ERRO TS18048: Forçamos o acesso como 'any' para o compilador do Netlify não travar
+      // Hammer Fix para TS18048: Casting para any garante que o build do Netlify passe
       const args = (fc as any).args;
       const termo = String(args?.termo || "").toLowerCase();
       
@@ -110,7 +110,7 @@ REGRAS DE OURO:
         functionResponse: { 
           name: fc.name, 
           id: fc.id, 
-          response: { result: matches.length > 0 ? "Livros localizados." : "Não temos no estoque." } 
+          response: { result: matches.length > 0 ? "Livros encontrados." : "Não localizado." } 
         }
       });
     }
@@ -122,14 +122,14 @@ REGRAS DE OURO:
     });
 
     return {
-      responseText: secondTurn.text || "🦉 Aqui estão as informações do estoque.",
+      responseText: secondTurn.text || "🦉 Consultei o estoque para você.",
       recommendedBooks: allMatches,
       groundingUrls: secondTurn.candidates?.[0]?.groundingMetadata?.groundingChunks?.filter((c: any) => c.web).map((c: any) => ({ uri: c.web.uri, title: c.web.title }))
     };
 
   } catch (error: any) {
-    if (isRetryableError(error)) return { responseText: "🦉 O Google me deu um cansaço (limite de quota)! Vamos tentar de novo em uns segundos?", recommendedBooks: [], isQuotaError: true };
-    return { responseText: "🦉 Tive um pequeno problema técnico. Pode repetir?", recommendedBooks: [] };
+    if (isRetryableError(error)) return { responseText: "🦉 Minha quota de pensamento acabou por um minuto. Tenta de novo?", recommendedBooks: [], isQuotaError: true };
+    return { responseText: "🦉 Opa, tive um tropeço técnico. Pode repetir?", recommendedBooks: [] };
   }
 }
 
