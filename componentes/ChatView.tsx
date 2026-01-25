@@ -38,7 +38,6 @@ const ChatView: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Timeout para garantir que o scroll ocorra após a renderização do conteúdo
     setTimeout(() => {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
@@ -85,18 +84,24 @@ const ChatView: React.FC = () => {
         content: result.responseText, 
         timestamp: new Date(),
         suggestedBooks: result.recommendedBooks,
-        isLocalResponse: result.isLocalResponse
+        isLocalResponse: result.isLocalResponse,
+        isQuotaError: result.isQuotaError
       };
       
       const newHistory = [...messages, userMsg, assistantMsg];
       setMessages(newHistory);
       await db.save('nobel_chat_history', newHistory);
-      setCurrentMood(result.isLocalResponse ? 'success' : 'happy');
+      
+      if (result.isQuotaError) {
+        setCurrentMood('tired');
+      } else {
+        setCurrentMood(result.isLocalResponse ? 'success' : 'happy');
+      }
     } catch (e: any) {
       setCurrentMood('tired');
       const errorMsg: ChatMessage = { 
         role: 'assistant', 
-        content: `🦉 Tive um problema ao processar essa informação agora. Pode repetir?`, 
+        content: `🦉 Tive um pequeno soluço aqui. Pode perguntar de novo ou tentar buscar pelo nome do livro?`, 
         timestamp: new Date() 
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -123,7 +128,7 @@ const ChatView: React.FC = () => {
              <div>
                 <h2 className="text-sm font-black uppercase tracking-widest text-zinc-100">Nobelino Vendedor</h2>
                 <div className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                  <span className={`w-1.5 h-1.5 rounded-full ${currentMood === 'tired' ? 'bg-orange-500 animate-pulse' : 'bg-green-500'}`}></span>
                   <span className="text-[8px] font-black text-zinc-500 uppercase tracking-tighter">
                     SINCRO: {inventory.length} LIVROS | {knowledge.length} REGRAS
                   </span>
@@ -136,8 +141,11 @@ const ChatView: React.FC = () => {
        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-12">
          {messages.map((m, i) => (
            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`group relative max-w-[85%] p-6 rounded-[32px] text-sm leading-relaxed shadow-2xl ${m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800'}`}>
-                {/* Renderização de texto garantindo que quebras de linha e markdown básico sejam visíveis */}
+              <div className={`group relative max-w-[85%] p-6 rounded-[32px] text-sm leading-relaxed shadow-2xl ${
+                m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 
+                m.isQuotaError ? 'bg-orange-900/20 border border-orange-800/50 text-orange-200' :
+                'bg-zinc-900 text-zinc-200 border border-zinc-800'
+              }`}>
                 <div className="whitespace-pre-wrap break-words prose prose-invert prose-sm">
                   {m.content}
                 </div>
@@ -155,8 +163,12 @@ const ChatView: React.FC = () => {
                       {savingId === i ? '✓ REGRA SALVA!' : '+ SALVAR COMO REGRA'}
                     </button>
                     
-                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md border ${m.isLocalResponse ? 'text-green-500 border-green-500/20 bg-green-500/5' : 'text-blue-400 border-blue-400/20 bg-blue-400/5'}`}>
-                      {m.isLocalResponse ? 'MEMÓRIA LOCAL' : 'IA COGNITIVA'}
+                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md border ${
+                      m.isQuotaError ? 'text-orange-400 border-orange-400/20 bg-orange-400/5' :
+                      m.isLocalResponse ? 'text-green-500 border-green-500/20 bg-green-500/5' : 
+                      'text-blue-400 border-blue-400/20 bg-blue-400/5'
+                    }`}>
+                      {m.isQuotaError ? 'LIMITE ATINGIDO' : m.isLocalResponse ? 'MEMÓRIA LOCAL' : 'IA COGNITIVA'}
                     </span>
                   </div>
                 )}

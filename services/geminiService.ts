@@ -7,6 +7,28 @@ export interface AIResult {
   recommendedBooks: Book[];
   groundingUrls?: { uri: string; title: string }[];
   isLocalResponse: boolean;
+  isQuotaError?: boolean;
+}
+
+// Função de busca local para reduzir o contexto enviado à IA
+function findRelevantBooks(query: string, inventory: Book[], limit = 5): Book[] {
+  const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+  if (terms.length === 0) return inventory.slice(0, limit);
+
+  return inventory
+    .map(book => {
+      let score = 0;
+      const searchable = `${book.title} ${book.author} ${book.genre} ${book.isbn}`.toLowerCase();
+      terms.forEach(term => {
+        if (searchable.includes(term)) score += 1;
+        if (book.title.toLowerCase().includes(term)) score += 2; // Título vale mais
+      });
+      return { book, score };
+    })
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(item => item.book)
+    .slice(0, limit);
 }
 
 export async function processUserQuery(
@@ -19,66 +41,63 @@ export async function processUserQuery(
   const normalizedQuery = query.toLowerCase().trim();
   const activeRules = knowledgeBase.filter(k => k.active);
 
-  // 1. BUSCA LOCAL INSTANTÂNEA EM ESTOQUE (Título ou ISBN)
+  // 1. BUSCA LOCAL INSTANTÂNEA (ISBN ou Termo Exato)
   const isbnMatch = query.match(/\d{10,13}/);
   if (isbnMatch) {
-    const book = inventory.find(b => b.isbn === isbnMatch[0]);
+    const book = inventory.find(b => b.isbn.includes(isbnMatch[0]));
     if (book) {
       return {
-        responseText: `Encontrei no estoque! O livro "${book.title}" está disponível por R$ ${Number(book.price).toFixed(2)}. Temos ${book.stockCount} unidades.`,
+        responseText: `Localizei no acervo! O livro "${book.title}" de ${book.author} está disponível por R$ ${Number(book.price).toFixed(2)}. Temos ${book.stockCount} unidades em estoque.`,
         recommendedBooks: [book],
         isLocalResponse: true
       };
     }
   }
 
-  // 2. IA COM CONTEXTO HÍBRIDO (ESTOQUE + REGRAS + METAS)
+  // 2. SELEÇÃO DE CONTEXTO RELEVANTE (RAG Local)
+  // Em vez de enviar 50 livros, enviamos apenas os 6 mais prováveis
+  const relevantBooks = findRelevantBooks(query, inventory, 6);
+  
   const apiKey = process.env.API_KEY;
   if (!apiKey) throw new Error("API Key não configurada");
 
   const ai = new GoogleGenAI({ apiKey });
   const model = "gemini-3-flash-preview"; 
 
-  // Status de Metas de Hoje
   const today = new Date().toISOString().split('T')[0];
   const todayGoal = salesGoals.find(g => g.date === today) || { actualSales: 0, minGoal: 0, superGoal: 0 };
   
-  const salesStatus = `STATUS DE VENDAS HOJE:
-- Vendido até agora: R$ ${todayGoal.actualSales.toLocaleString('pt-BR')}
-- Meta Mínima: R$ ${todayGoal.minGoal.toLocaleString('pt-BR')}
-- Super Meta: R$ ${todayGoal.superGoal.toLocaleString('pt-BR')}
-- Falta para meta mínima: R$ ${Math.max(0, todayGoal.minGoal - todayGoal.actualSales).toLocaleString('pt-BR')}`;
+  const salesStatus = `VENDAS HOJE: R$ ${todayGoal.actualSales.toFixed(2)} (Meta: R$ ${todayGoal.minGoal.toFixed(2)})`;
 
   const manualContext = activeRules.length > 0 
-    ? activeRules.map(k => `REGRA [${k.topic}]: ${k.content}`).join('\n\n')
-    : "Nenhuma regra de treinamento cadastrada.";
+    ? activeRules.map(k => `- ${k.topic}: ${k.content}`).join('\n')
+    : "Sem regras específicas.";
 
-  const stockContext = inventory.slice(0, 50).map(b => 
-    `- ${b.title} (ISBN: ${b.isbn}) | Preço: R$ ${b.price} | Estoque: ${b.stockCount}`
-  ).join('\n');
+  // Contexto de estoque filtrado (Muito mais leve em tokens!)
+  const stockContext = relevantBooks.length > 0
+    ? relevantBooks.map(b => `- ${b.title} | R$ ${b.price} | Stock: ${b.stockCount} | ISBN: ${b.isbn}`).join('\n')
+    : "Nenhum livro específico encontrado na busca rápida. Use o conhecimento geral da Nobel.";
 
-  const systemInstruction = `Você é o NOBELINO, o assistente inteligente da Livraria Nobel.
-
+  const systemInstruction = `Você é o NOBELINO, assistente da Livraria Nobel.
 ${salesStatus}
 
-MANUAL DA LOJA (REGRAS E PROCESSOS):
+REGRAS DA LOJA:
 ${manualContext}
 
-ESTOQUE EM DESTAQUE:
+LIVROS MAIS RELEVANTES PARA ESTA PERGUNTA:
 ${stockContext}
 
-INSTRUÇÕES:
-1. Responda SEMPRE de forma completa. Nunca corte frases ou valores monetários.
-2. Se houver promoções (como a Matilda por 47,90), garanta que o valor completo seja escrito.
-3. Priorize as REGRAS e o ESTOQUE para responder dúvidas técnicas.
-4. Se perguntarem sobre preços, use o ESTOQUE acima.
-5. Seja entusiasmado e use emojis moderadamente.`;
+DIRETRIZES:
+1. Seja breve e direto. Use o estoque acima para preços.
+2. Se o livro não estiver na lista acima, diga que vai verificar no sistema master.
+3. Mantenha o tom profissional e vendedor.`;
 
   try {
     const response = await ai.models.generateContent({
       model,
       contents: [
-        ...history.slice(-10).map(m => ({ 
+        // Enviamos apenas as últimas 4 mensagens para economizar tokens
+        ...history.slice(-4).map(m => ({ 
           role: m.role === 'user' ? 'user' : 'model' as any, 
           parts: [{ text: m.content }] 
         })),
@@ -86,22 +105,37 @@ INSTRUÇÕES:
       ],
       config: { 
         systemInstruction,
-        temperature: 0.1,
-        maxOutputTokens: 2048 // Aumentado para evitar truncamento como o "R$ 4" incompleto
+        temperature: 0.2,
+        maxOutputTokens: 800 
       }
     });
 
+    const text = response.text;
+    if (!text) throw new Error("Resposta vazia da IA");
+
     return {
-      responseText: response.text || "Vou verificar isso com o gerente.",
-      recommendedBooks: [],
+      responseText: text,
+      recommendedBooks: relevantBooks,
       isLocalResponse: false
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Erro na IA:", error);
+    
+    // FALLBACK: Se a IA falhar (por cota ou rede), tentamos uma resposta local baseada na busca
+    if (relevantBooks.length > 0) {
+      return {
+        responseText: `Estou com uma alta demanda de consultas agora, mas verifiquei rapidamente no meu banco de dados local: Encontrei "${relevantBooks[0].title}" por R$ ${relevantBooks[0].price.toFixed(2)}. Posso ajudar com mais detalhes deste título?`,
+        recommendedBooks: [relevantBooks[0]],
+        isLocalResponse: true,
+        isQuotaError: true
+      };
+    }
+
     return {
-      responseText: "Tive um problema ao processar essa informação agora.",
+      responseText: "Tive um problema de conexão com meus servidores centrais. Posso tentar novamente em alguns segundos ou você pode buscar pelo ISBN diretamente.",
       recommendedBooks: [],
-      isLocalResponse: true
+      isLocalResponse: true,
+      isQuotaError: true
     };
   }
 }
