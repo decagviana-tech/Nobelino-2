@@ -46,6 +46,12 @@ export const db = {
     });
   },
 
+  // Helper para normalizar ISBN (remove tudo que não é número)
+  normalizeISBN(val: any): string {
+    if (!val) return "";
+    return String(val).replace(/\D/g, "");
+  },
+
   async addKnowledge(topic: string, content: string) {
     const current = await this.get('nobel_knowledge_base') || [];
     const newEntry = {
@@ -76,7 +82,6 @@ export const db = {
   parseValue(val: any): number | null {
     if (val === undefined || val === null || val === "") return null;
     if (typeof val === 'number') return val;
-    // Remove R$, espaços e converte vírgula decimal para ponto
     const cleaned = String(val).replace(/[R$\s]/g, '').replace(',', '.');
     const num = parseFloat(cleaned);
     return isNaN(num) ? null : num;
@@ -108,8 +113,9 @@ export const db = {
 
     incomingBooks.forEach(incoming => {
       const isbnRaw = this.getValueByPattern(incoming, ISBN_ALIASES);
-      const isbnStr = isbnRaw ? String(isbnRaw).trim() : "";
-      if (!isbnStr || isbnStr === "0") return;
+      const isbnClean = this.normalizeISBN(isbnRaw);
+      
+      if (!isbnClean || isbnClean === "0") return;
 
       const title = this.getValueByPattern(incoming, TITLE_ALIASES);
       const author = this.getValueByPattern(incoming, AUTHOR_ALIASES);
@@ -119,15 +125,11 @@ export const db = {
       const priceVal = this.parseValue(this.getValueByPattern(incoming, PRICE_ALIASES));
       const stockVal = this.parseValue(this.getValueByPattern(incoming, STOCK_ALIASES));
 
-      const idx = updatedInventory.findIndex(b => b.isbn === isbnStr);
+      // Busca usando o ISBN normalizado (apenas números)
+      const idx = updatedInventory.findIndex(b => this.normalizeISBN(b.isbn) === isbnClean);
       
       if (idx !== -1) {
         const existing = updatedInventory[idx];
-        
-        // Regra de Enriquecimento:
-        // 1. Se o valor na planilha existe e é diferente do atual, atualiza.
-        // 2. Se for Preço ou Quantidade, altera sempre que o valor vier preenchido.
-        // 3. Se for Sinopse/Autor/Gênero, adiciona se o atual for vazio ou se o novo vier com conteúdo.
         
         updatedInventory[idx] = { 
           ...existing, 
@@ -135,19 +137,20 @@ export const db = {
           author: author ? String(author).trim() : existing.author,
           description: description ? String(description).trim() : existing.description,
           genre: genre ? String(genre).trim() : existing.genre,
+          // SUBSTITUI (Overwrite) o valor para não somar duplicado
           price: (priceVal !== null) ? priceVal : existing.price,
           stockCount: (stockVal !== null) ? Math.floor(stockVal) : existing.stockCount,
+          isbn: isbnClean, // Padroniza o ISBN no banco para apenas números
           enriched: !!(description || existing.description)
         };
         updated++;
       } else {
-        // Novo cadastro via planilha
-        if (title || isbnStr) {
+        if (title || isbnClean) {
           updatedInventory.push({
             id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
             title: title ? String(title).trim() : "Título não informado",
             author: author ? String(author).trim() : "Desconhecido",
-            isbn: isbnStr,
+            isbn: isbnClean,
             price: priceVal !== null ? priceVal : 0,
             stockCount: stockVal !== null ? Math.floor(stockVal) : 0,
             genre: genre ? String(genre).trim() : "Geral",
@@ -161,6 +164,10 @@ export const db = {
 
     await this.save('nobel_inventory', updatedInventory);
     return { added, updated };
+  },
+
+  async clearInventory() {
+    await this.save('nobel_inventory', []);
   },
 
   async updateDailySales(amount: number) {

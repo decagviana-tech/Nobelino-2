@@ -29,14 +29,13 @@ const InventoryManager: React.FC = () => {
     reader.onload = async (evt) => {
       try {
         const data = evt.target?.result;
-        // O XLSX.read com type 'array' lida bem com XLSX e CSV
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         const json = XLSX.utils.sheet_to_json(worksheet);
         
         const result = await db.syncInventory(json);
-        alert(`Sincronização Nobel Concluída!\n\n- ${result.added} novos títulos adicionados\n- ${result.updated} títulos atualizados ou enriquecidos.\n\nPreços e estoques foram ajustados conforme a planilha. Sinopses e autores foram adicionados aos livros correspondentes.`);
+        alert(`Sincronização Nobel Concluída!\n\n- ${result.added} novos títulos\n- ${result.updated} atualizados.\n\nPreços e estoques foram substituídos pelos valores da planilha para evitar duplicidade.`);
         load();
       } catch (error) {
         console.error("Erro na importação:", error);
@@ -49,6 +48,14 @@ const InventoryManager: React.FC = () => {
     reader.readAsArrayBuffer(file);
   };
 
+  const handleClearAll = async () => {
+    if (confirm("⚠️ DESEJA LIMPAR TODO O ACERVO?\n\nIsso removerá os 23.000+ itens atuais para que você possa subir uma planilha limpa. Esta ação não pode ser desfeita.")) {
+      await db.clearInventory();
+      await load();
+      alert("Acervo limpo com sucesso. Agora você pode importar sua planilha novamente.");
+    }
+  };
+
   const filtered = books.filter(b => 
     b.title.toLowerCase().includes(search.toLowerCase()) || 
     b.isbn.includes(search) ||
@@ -58,14 +65,20 @@ const InventoryManager: React.FC = () => {
 
   return (
     <div className="p-8 bg-zinc-950 h-full overflow-y-auto custom-scrollbar">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex justify-between items-center mb-8 border-b border-white/5 pb-8">
         <div>
            <h2 className="text-3xl font-black text-white uppercase tracking-tighter italic">Acervo Nobel</h2>
-           <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em]">{books.length} Livros em Memória</p>
+           <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em]">{books.length.toLocaleString('pt-BR')} Títulos em Memória</p>
         </div>
         <div className="flex gap-3">
+          <button 
+            onClick={handleClearAll}
+            className="px-4 py-3 rounded-xl border border-red-500/20 text-red-500 text-[9px] font-black uppercase hover:bg-red-500 hover:text-white transition-all"
+          >
+            Limpar Acervo
+          </button>
           <label className={`bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-[10px] uppercase cursor-pointer hover:bg-blue-500 transition-all flex items-center gap-2 shadow-xl shadow-blue-600/10 ${isSyncing ? 'opacity-50 pointer-events-none' : ''}`}>
-            {isSyncing ? 'Processando...' : '📥 Importar Planilha (XLSX/CSV)'}
+            {isSyncing ? 'Processando...' : '📥 Importar Planilha'}
             <input type="file" className="hidden" onChange={handleFileUpload} disabled={isSyncing} accept=".xlsx,.xls,.csv" />
           </label>
         </div>
@@ -82,7 +95,7 @@ const InventoryManager: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {filtered.map(book => (
+        {filtered.slice(0, 100).map(book => (
           <div 
             key={book.id} 
             onClick={() => setSelectedBook(book)}
@@ -117,6 +130,12 @@ const InventoryManager: React.FC = () => {
         ))}
       </div>
 
+      {books.length > 100 && !search && (
+        <div className="p-8 text-center text-zinc-600 text-[10px] font-black uppercase tracking-widest">
+          Mostrando os primeiros 100 livros de {books.length}. Use a busca para filtrar.
+        </div>
+      )}
+
       {selectedBook && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
            <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setSelectedBook(null)}></div>
@@ -132,7 +151,7 @@ const InventoryManager: React.FC = () => {
               <div className="flex-1 overflow-y-auto custom-scrollbar pr-4 mb-8">
                  <h5 className="text-[10px] font-black text-zinc-600 uppercase mb-3">Sinopse do Livro</h5>
                  <p className="text-zinc-300 text-sm leading-relaxed font-medium">
-                    {selectedBook.description || "Nenhuma sinopse cadastrada para este título ainda. Adicione via planilha para enriquecer o atendimento do Nobelino."}
+                    {selectedBook.description || "Nenhuma sinopse cadastrada para este título ainda."}
                  </p>
               </div>
 
