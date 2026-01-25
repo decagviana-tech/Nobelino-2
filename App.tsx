@@ -20,12 +20,24 @@ const App: React.FC = () => {
   const [limit, setLimit] = useState<number>(1500);
   const [inventory, setInventory] = useState([]);
   const [knowledge, setKnowledge] = useState([]);
+  const [hasKey, setHasKey] = useState<boolean | null>(null);
+
+  const checkKey = async () => {
+    // @ts-ignore
+    const selected = await window.aistudio.hasSelectedApiKey();
+    setHasKey(selected);
+  };
+
+  const handleSelectKey = async () => {
+    // @ts-ignore
+    await window.aistudio.openSelectKey();
+    setHasKey(true);
+  };
 
   const loadData = async () => {
     const today = new Date().toISOString().split('T')[0];
     let metrics: UsageMetrics = await db.get('nobel_usage_metrics');
     
-    // Se não existir ou o dia mudou, reseta o uso automaticamente
     if (!metrics || metrics.lastResetDate !== today) {
       metrics = {
         dailyRequests: 0,
@@ -47,10 +59,47 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    checkKey();
     loadData();
     window.addEventListener('nobel_usage_updated', loadData);
     return () => window.removeEventListener('nobel_usage_updated', loadData);
   }, []);
+
+  if (hasKey === false) {
+    return (
+      <div className="h-screen w-full bg-[#09090b] flex items-center justify-center p-6 text-center">
+        <div className="max-w-md space-y-8 animate-in fade-in zoom-in duration-500">
+          <Mascot className="w-32 h-32 mx-auto" animated />
+          <div className="space-y-4">
+            <h1 className="text-3xl font-black text-white uppercase tracking-tighter">Configuração Nobel</h1>
+            <p className="text-zinc-400 text-sm leading-relaxed">
+              Para o Nobelino trabalhar com velocidade total e sem limites, você precisa conectar sua chave de API do Google.
+              <br/><br/>
+              <span className="text-yellow-400 font-bold">Dica:</span> Use uma conta com faturamento ativado (Billing) para evitar travamentos.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3">
+            <button 
+              onClick={handleSelectKey}
+              className="w-full bg-yellow-400 text-black py-4 rounded-2xl font-black uppercase text-sm hover:bg-yellow-300 transition-all shadow-xl shadow-yellow-400/10"
+            >
+              Conectar Minha Chave
+            </button>
+            <a 
+              href="https://ai.google.dev/gemini-api/docs/billing" 
+              target="_blank" 
+              rel="noreferrer"
+              className="text-[10px] text-zinc-600 uppercase font-bold hover:text-zinc-400 transition-colors"
+            >
+              Saiba mais sobre custos e limites
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (hasKey === null) return null;
 
   const usagePercent = Math.min(100, (usage / limit) * 100);
 

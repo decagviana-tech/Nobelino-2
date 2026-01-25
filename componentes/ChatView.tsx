@@ -47,12 +47,11 @@ const ChatView: React.FC = () => {
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
     
-    // Checagem de limite em tempo real
     const metrics = await db.get('nobel_usage_metrics');
     if (metrics && metrics.dailyRequests >= (metrics.usageLimit || 1500)) {
       setMessages(prev => [...prev, { 
         role: 'assistant', 
-        content: "🦉 Opa! Já bati meu limite diário de trabalho. Por favor, resete meus dados na aba 'Sincronização' ou aguarde até amanhã!", 
+        content: "🦉 Opa! Meu limite diário acabou. Vá em 'Sincronização' e use o 'Reset de Emergência' ou conecte uma chave paga clicando em 'Recarregar'!", 
         timestamp: new Date() 
       }]);
       setCurrentMood('tired');
@@ -68,7 +67,6 @@ const ChatView: React.FC = () => {
     try {
       const result = await processUserQuery(userMsg.content, inventory, messages, knowledge, salesGoals);
       
-      // Incrementa uso com segurança
       if (metrics) {
         metrics.dailyRequests += 1;
         await db.save('nobel_usage_metrics', metrics);
@@ -87,8 +85,14 @@ const ChatView: React.FC = () => {
       setMessages(newHistory);
       await db.save('nobel_chat_history', newHistory);
       setCurrentMood('happy');
-    } catch (e) {
+    } catch (e: any) {
       setCurrentMood('tired');
+      const errorMsg: ChatMessage = { 
+        role: 'assistant', 
+        content: `🦉 Desculpe, tive um problema: ${e.message}. Tente novamente em alguns segundos ou verifique sua conexão.`, 
+        timestamp: new Date() 
+      };
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
     }
@@ -106,7 +110,16 @@ const ChatView: React.FC = () => {
                 <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-wider">🧠 {knowledge.length} REGRAS ATIVAS</span>
              </div>
           </div>
-          <button onClick={resetChat} className="p-3 bg-zinc-900 rounded-xl text-zinc-600 hover:text-white transition-colors">🗑️</button>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => window.location.reload()} 
+              className="p-3 bg-zinc-900 rounded-xl text-zinc-600 hover:text-yellow-400 transition-colors"
+              title="Trocar Chave / Recarregar"
+            >
+              🔑
+            </button>
+            <button onClick={resetChat} className="p-3 bg-zinc-900 rounded-xl text-zinc-600 hover:text-white transition-colors">🗑️</button>
+          </div>
        </header>
 
        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">

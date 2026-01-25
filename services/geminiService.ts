@@ -26,8 +26,9 @@ export async function processUserQuery(
   salesGoals: SalesGoal[] = []
 ): Promise<AIResult> {
   const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("API Key missing");
+  if (!apiKey) throw new Error("A chave de API não foi configurada.");
 
+  // Sempre cria uma nova instância para garantir que usa a chave atualizada do seletor
   const ai = new GoogleGenAI({ apiKey });
   const model = "gemini-3-flash-preview"; 
   
@@ -36,11 +37,15 @@ export async function processUserQuery(
     .map(k => `REGRA: ${k.content}`)
     .join('\n');
 
-  const systemInstruction = `Você é o NOBELINO, o assistente virtual da Livraria Nobel.
-IDENTIDADE: Uma corujinha amarela simpática com camisa polo preta da Nobel.
-REGRAS:
+  const systemInstruction = `Você é o NOBELINO, assistente oficial da Livraria Nobel.
+IDENTIDADE: Coruja amarela simpática de camisa polo preta da Nobel.
+CONTEXTO: Vendedor experiente, culto e ágil.
+REGRAS ATIVAS:
 ${activeRules}
-Use ferramentas para consultar o estoque quando necessário. Seja um vendedor experiente.`;
+
+Se o cliente perguntar algo sobre livros, use a ferramenta 'consultarEstoque'. 
+Se perguntar algo geral ou atual, use a ferramenta 'googleSearch'.
+Responda de forma vendedora e carismática.`;
 
   const contents = history.slice(-5).map(msg => ({
     role: msg.role === 'assistant' ? 'model' : 'user' as any,
@@ -48,54 +53,63 @@ Use ferramentas para consultar o estoque quando necessário. Seja um vendedor ex
   }));
   contents.push({ role: 'user', parts: [{ text: query }] });
 
-  const response = await ai.models.generateContent({
-    model,
-    contents,
-    config: { 
-      systemInstruction, 
-      tools: [{ functionDeclarations: [consultarEstoqueFunction] }, { googleSearch: {} }],
-    }
-  });
-
-  const candidate = response.candidates?.[0];
-  const functionCalls = response.functionCalls;
-
-  if (functionCalls && functionCalls.length > 0) {
-    const fc = functionCalls[0];
-    const termo = String((fc as any).args?.termo || "").toLowerCase();
-    const matches = inventory.filter(b => 
-      b.title.toLowerCase().includes(termo) || b.author.toLowerCase().includes(termo)
-    ).slice(0, 3);
-
-    const secondTurn = await ai.models.generateContent({
+  try {
+    const response = await ai.models.generateContent({
       model,
-      contents: [
-        ...contents, 
-        { role: 'model', parts: candidate?.content?.parts || [] },
-        { 
-          role: 'user', 
-          parts: [{ 
-            functionResponse: { 
-              name: fc.name, 
-              id: fc.id, 
-              response: { result: matches.length > 0 ? "Livros encontrados" : "Não encontrado" } 
-            } 
-          }] 
-        }
-      ],
-      config: { systemInstruction }
+      contents,
+      config: { 
+        systemInstruction, 
+        tools: [{ functionDeclarations: [consultarEstoqueFunction] }, { googleSearch: {} }],
+      }
     });
 
-    return {
-      responseText: secondTurn.text || "Consultei o estoque para você.",
-      recommendedBooks: matches
-    };
-  }
+    const candidate = response.candidates?.[0];
+    const functionCalls = response.functionCalls;
 
-  return {
-    responseText: response.text || "Não entendi, pode repetir?",
-    recommendedBooks: []
-  };
+    if (functionCalls && functionCalls.length > 0) {
+      const fc = functionCalls[0];
+      const termo = String((fc as any).args?.termo || "").toLowerCase();
+      const matches = inventory.filter(b => 
+        b.title.toLowerCase().includes(termo) || b.author.toLowerCase().includes(termo)
+      ).slice(0, 3);
+
+      const secondTurn = await ai.models.generateContent({
+        model,
+        contents: [
+          ...contents, 
+          { role: 'model', parts: candidate?.content?.parts || [] },
+          { 
+            role: 'user', 
+            parts: [{ 
+              functionResponse: { 
+                name: fc.name, 
+                id: fc.id, 
+                response: { result: matches.length > 0 ? "Livros encontrados no sistema" : "Nenhum livro encontrado com esse nome no estoque atual" } 
+              } 
+            }] 
+          }
+        ],
+        config: { systemInstruction }
+      });
+
+      return {
+        responseText: secondTurn.text || "Verifiquei nosso estoque para você.",
+        recommendedBooks: matches
+      };
+    }
+
+    return {
+      responseText: response.text || "Olá! Como posso ajudar na Nobel hoje?",
+      recommendedBooks: []
+    };
+  } catch (error: any) {
+    if (error.message?.includes("entity was not found")) {
+      // @ts-ignore
+      await window.aistudio.openSelectKey();
+      throw new Error("Por favor, selecione uma chave válida.");
+    }
+    throw error;
+  }
 }
 
 export async function speakText(text: string): Promise<string | undefined> {
