@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, Book, KnowledgeEntry, SalesGoal } from '../types';
 import { INITIAL_INVENTORY } from '../data/mockInventory';
-import { processUserQuery, speakText } from '../services/geminiService';
+import { processUserQuery } from '../services/geminiService';
 import { db } from '../services/db';
 import Mascot from './Mascot';
 
@@ -13,7 +13,6 @@ const ChatView: React.FC = () => {
   const [salesGoals, setSalesGoals] = useState<SalesGoal[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentMood, setCurrentMood] = useState<'happy' | 'thinking' | 'surprised' | 'tired' | 'success'>('happy');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +47,18 @@ const ChatView: React.FC = () => {
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
     
+    // Verifica limite antes de enviar
+    const metrics = await db.get('nobel_usage_metrics');
+    if (metrics && metrics.dailyRequests >= (metrics.usageLimit || 1500)) {
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: "🦉 Opa! Já trabalhei muito por hoje e atingi meu limite diário. Podemos continuar amanhã?", 
+        timestamp: new Date() 
+      }]);
+      setCurrentMood('tired');
+      return;
+    }
+
     const userMsg: ChatMessage = { role: 'user', content: input.trim(), timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
@@ -56,6 +67,14 @@ const ChatView: React.FC = () => {
 
     try {
       const result = await processUserQuery(userMsg.content, inventory, messages, knowledge, salesGoals);
+      
+      // Incrementa uso no DB
+      if (metrics) {
+        metrics.dailyRequests += 1;
+        await db.save('nobel_usage_metrics', metrics);
+        window.dispatchEvent(new CustomEvent('nobel_usage_updated'));
+      }
+
       const assistantMsg: ChatMessage = { 
         role: 'assistant', 
         content: result.responseText, 
@@ -80,7 +99,7 @@ const ChatView: React.FC = () => {
        <header className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50 backdrop-blur-md">
           <div className="flex items-center gap-3">
              <div className="w-12 h-12">
-                <Mascot animated={isLoading} talking={isSpeaking} mood={currentMood} />
+                <Mascot animated={isLoading} mood={currentMood} />
              </div>
              <div>
                 <h2 className="text-sm font-black uppercase tracking-widest text-zinc-100">Nobelino Consultor</h2>
@@ -110,7 +129,7 @@ const ChatView: React.FC = () => {
          ))}
          {isLoading && (
            <div className="flex justify-start animate-pulse">
-              <div className="bg-zinc-900 text-zinc-500 p-4 rounded-full text-xs font-black uppercase">🦉 Pensando...</div>
+              <div className="bg-zinc-900 text-zinc-500 p-4 rounded-full text-xs font-black uppercase">🦉 Analisando estoque...</div>
            </div>
          )}
          <div ref={chatEndRef} />
@@ -122,10 +141,16 @@ const ChatView: React.FC = () => {
                value={input} 
                onChange={e => setInput(e.target.value)} 
                onKeyDown={e => e.key === 'Enter' && handleSend()}
-               placeholder="Pergunte sobre livros, metas ou regras..." 
-               className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-6 py-4 text-white focus:border-yellow-400 outline-none" 
+               placeholder="Pergunte sobre livros, autores ou promoções..." 
+               className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-6 py-4 text-white focus:border-yellow-400 outline-none transition-all shadow-inner" 
              />
-             <button onClick={handleSend} className="bg-yellow-400 text-black px-8 rounded-2xl font-black uppercase text-xs">Enviar</button>
+             <button 
+               onClick={handleSend} 
+               disabled={isLoading}
+               className="bg-yellow-400 text-black px-8 rounded-2xl font-black uppercase text-xs hover:bg-yellow-300 transition-colors disabled:opacity-50"
+             >
+               Enviar
+             </button>
           </div>
        </div>
     </div>

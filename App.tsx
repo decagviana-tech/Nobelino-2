@@ -23,11 +23,23 @@ const App: React.FC = () => {
 
   const loadData = async () => {
     const today = new Date().toISOString().split('T')[0];
-    const metrics: UsageMetrics = await db.get('nobel_usage_metrics');
-    if (metrics && metrics.lastResetDate === today) {
-      setUsage(metrics.dailyRequests);
-      setLimit(metrics.usageLimit || 1500);
+    let metrics: UsageMetrics = await db.get('nobel_usage_metrics');
+    
+    // Lógica de Reset Diário: Se não existe ou o dia mudou, reseta o uso
+    if (!metrics || metrics.lastResetDate !== today) {
+      metrics = {
+        dailyRequests: 0,
+        dailyEnrichments: 0,
+        lastResetDate: today,
+        totalTokensEstimate: 0,
+        usageLimit: 1500
+      };
+      await db.save('nobel_usage_metrics', metrics);
     }
+    
+    setUsage(metrics.dailyRequests);
+    setLimit(metrics.usageLimit || 1500);
+
     const inv = await db.get('nobel_inventory');
     const knw = await db.get('nobel_knowledge_base');
     setInventory(inv || []);
@@ -36,12 +48,15 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    // Escuta atualizações de uso vindas de outros componentes
     window.addEventListener('nobel_usage_updated', loadData);
     return () => window.removeEventListener('nobel_usage_updated', loadData);
   }, []);
 
+  const usagePercent = Math.min(100, (usage / limit) * 100);
+
   return (
-    <div className="flex h-screen bg-[#09090b] text-zinc-100 overflow-hidden">
+    <div className="flex h-screen bg-[#09090b] text-zinc-100 overflow-hidden font-sans">
       <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} glass border-r border-zinc-800 transition-all duration-300 flex flex-col z-50`}>
         <div className="p-6 flex items-center gap-3">
           <div className="w-10 h-10 shrink-0">
@@ -50,7 +65,7 @@ const App: React.FC = () => {
           {isSidebarOpen && (
             <div className="animate-in fade-in duration-500">
               <h1 className="font-black text-lg tracking-tighter text-white">NOBEL<span className="text-yellow-400">.</span></h1>
-              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Digital Vendedor</p>
+              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Vendedor Digital</p>
             </div>
           )}
         </div>
@@ -63,7 +78,21 @@ const App: React.FC = () => {
           <NavItem icon="🧠" label="Regras" active={view === 'knowledge'} onClick={() => setView('knowledge')} collapsed={!isSidebarOpen} />
         </nav>
 
-        <div className="p-4 border-t border-zinc-800">
+        <div className="p-4 border-t border-zinc-800 space-y-4">
+          {isSidebarOpen && (
+            <div className="px-2">
+              <div className="flex justify-between text-[10px] font-black uppercase text-zinc-500 mb-1">
+                <span>Uso Diário</span>
+                <span>{usage}/{limit}</span>
+              </div>
+              <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full transition-all duration-500 ${usagePercent > 80 ? 'bg-red-500' : 'bg-yellow-400'}`} 
+                  style={{ width: `${usagePercent}%` }}
+                />
+              </div>
+            </div>
+          )}
           <button 
             onClick={() => setSidebarOpen(!isSidebarOpen)}
             className="w-full py-2 bg-zinc-900 rounded-xl text-xs font-bold hover:bg-zinc-800 transition-colors"
