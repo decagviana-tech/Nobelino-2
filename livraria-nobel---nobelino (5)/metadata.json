@@ -1,0 +1,8 @@
+{
+  "name": "Livraria Nobel - Nobelino",
+  "description": "Assistente cognitivo para vendedores da Livraria Nobel.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ]
+}
