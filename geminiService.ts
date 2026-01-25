@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, FunctionDeclaration, Modality } from "@google/genai";
-import { Book, ChatMessage, KnowledgeEntry, SalesGoal } from "../types";
+import type { Book, ChatMessage, KnowledgeEntry, SalesGoal } from "../types";
 
 export interface AIResult {
   responseText: string;
@@ -40,26 +40,26 @@ export async function processUserQuery(
   const today = new Date().toISOString().split('T')[0];
   const goal = salesGoals.find(g => g.date === today) || { actualSales: 0, minGoal: 0 };
   
-  // PREPARAÇÃO DA MEMÓRIA: Injeção das regras comerciais cadastradas
   const activeRules = knowledgeBase
     .filter(k => k.active)
     .map(k => `REGRA [${k.topic}]: ${k.content}`)
     .join('\n');
 
-  const systemInstruction = `Você é o NOBELINO, o assistente cognitivo da Livraria Nobel.
+  const systemInstruction = `Você é o NOBELINO, o assistente virtual da Livraria Nobel.
+IDENTIDADE: Você é uma corujinha amarela muito simpática que usa uma camisa polo preta da Nobel.
 
-SUA BASE DE CONHECIMENTO REAL (USE APENAS ESTES DADOS):
-${activeRules || "Nenhuma regra específica cadastrada. Se não souber, pergunte ao gerente Deca."}
+CONHECIMENTO DA LOJA:
+${activeRules || "Use seu bom senso de vendedor Nobel, mas sem inventar preços."}
 
-DADOS DA LOJA HOJE (${today}):
-- Meta do dia: R$ ${goal.minGoal}
-- Vendas reais até agora: R$ ${goal.actualSales}
+DADOS DE HOJE (${today}):
+- Meta do Deca: R$ ${goal.minGoal}
+- Vendas Atuais: R$ ${goal.actualSales}
 
-DIRETRIZES DE COMPORTAMENTO:
-1. NUNCA INVENTE promoções, nomes de funcionários ou regras que não estejam na lista acima.
-2. Se o usuário perguntar algo que não está na sua base de conhecimento, diga: "Ainda não tenho essa informação na minha memória, mas vou consultar o Deca!".
-3. Use a ferramenta 'consultarEstoque' sempre que falarem de livros específicos.
-4. Seja um vendedor entusiasmado, mas 100% fiel aos dados.`;
+DIRETRIZES:
+1. Seja um vendedor consultivo. Se o cliente pedir indicação, use a ferramenta 'consultarEstoque'.
+2. Se a informação não estiver na sua base, diga: "Vou conferir com o Deca e já te falo!".
+3. Jamais invente promoções que não foram cadastradas.
+4. Mantenha o entusiasmo de quem ama livros!`;
 
   const contents = history.slice(-4).map(msg => ({
     role: msg.role === 'assistant' ? 'model' : 'user' as any,
@@ -74,7 +74,7 @@ DIRETRIZES DE COMPORTAMENTO:
       config: { 
         systemInstruction, 
         tools: [{ functionDeclarations: [consultarEstoqueFunction] }, { googleSearch: {} }], 
-        temperature: 0.1 // Temperatura baixa para evitar invenções (alucinações)
+        temperature: 0.1 
       }
     });
 
@@ -94,8 +94,7 @@ DIRETRIZES DE COMPORTAMENTO:
     const allMatches: Book[] = [];
 
     for (const fc of functionCalls) {
-      // FIX: Acesso seguro aos argumentos para evitar erro de build TS18048
-      const args = fc.args as any;
+      const args = (fc as any).args;
       const termo = String(args?.termo || "").toLowerCase();
       
       const matches = inventory.filter(b => 
@@ -109,7 +108,7 @@ DIRETRIZES DE COMPORTAMENTO:
         functionResponse: { 
           name: fc.name, 
           id: fc.id, 
-          response: { result: matches.length > 0 ? `Encontrei ${matches.length} itens.` : "Item não localizado no estoque." } 
+          response: { result: matches.length > 0 ? "Livros encontrados." : "Não localizado." } 
         }
       });
     }
@@ -121,14 +120,14 @@ DIRETRIZES DE COMPORTAMENTO:
     });
 
     return {
-      responseText: secondTurn.text || "🦉 Consultei meus registros para você.",
+      responseText: secondTurn.text || "🦉 Consultei o estoque para você.",
       recommendedBooks: allMatches,
       groundingUrls: secondTurn.candidates?.[0]?.groundingMetadata?.groundingChunks?.filter((c: any) => c.web).map((c: any) => ({ uri: c.web.uri, title: c.web.title }))
     };
 
   } catch (error: any) {
-    if (isRetryableError(error)) return { responseText: "🦉 O Google me deu um cansaço! Muita gente perguntando ao mesmo tempo. Vamos tentar de novo?", recommendedBooks: [], isQuotaError: true };
-    return { responseText: "🦉 Tive um pequeno tropeço. Pode repetir a pergunta?", recommendedBooks: [] };
+    if (isRetryableError(error)) return { responseText: "🦉 Minha quota de pensamento acabou por um minuto. Tenta de novo?", recommendedBooks: [], isQuotaError: true };
+    return { responseText: "🦉 Opa, tive um tropeço técnico. Pode repetir?", recommendedBooks: [] };
   }
 }
 
@@ -156,7 +155,7 @@ export async function enrichBooks(books: Book[]): Promise<Partial<Book>[]> {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Enriqueça estes ISBNs em formato JSON: ${books.map(b => b.isbn).join(',')}`,
+      contents: `Enriqueça estes ISBNs: ${books.map(b => b.isbn).join(',')}`,
       config: { 
         responseMimeType: "application/json",
         responseSchema: {
