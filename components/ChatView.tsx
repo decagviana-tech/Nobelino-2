@@ -2,7 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, Book, KnowledgeEntry, SalesGoal } from '../types';
 import { INITIAL_INVENTORY } from '../data/mockInventory';
-import { processUserQuery, speakText } from '../services/geminiService';
+// Fix: Removed non-existent speakText export from geminiService
+import { processUserQuery } from '../services/geminiService';
 import { db } from '../services/db';
 import Mascot from './Mascot';
 

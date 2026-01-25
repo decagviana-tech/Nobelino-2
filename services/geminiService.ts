@@ -1,22 +1,13 @@
 
-import { GoogleGenAI, Type, FunctionDeclaration, Modality } from "@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import type { Book, ChatMessage, KnowledgeEntry, SalesGoal } from "../types";
 
 export interface AIResult {
   responseText: string;
   recommendedBooks: Book[];
   groundingUrls?: { uri: string; title: string }[];
+  isLocalResponse: boolean;
 }
-
-const consultarEstoqueFunction: FunctionDeclaration = {
-  name: "consultarEstoque",
-  parameters: {
-    type: Type.OBJECT,
-    description: "Busca livros no estoque da Nobel por título ou autor.",
-    properties: { termo: { type: Type.STRING, description: "O nome do livro ou autor" } },
-    required: ["termo"],
-  },
-};
 
 export async function processUserQuery(
   query: string,
@@ -25,106 +16,90 @@ export async function processUserQuery(
   knowledgeBase: KnowledgeEntry[] = [],
   salesGoals: SalesGoal[] = []
 ): Promise<AIResult> {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("A chave de API não foi configurada.");
+  const normalizedQuery = query.toLowerCase().trim();
+  const activeRules = knowledgeBase.filter(k => k.active);
 
-  // Sempre cria uma nova instância para garantir que usa a chave atualizada do seletor
+  // 1. BUSCA LOCAL INSTANTÂNEA EM ESTOQUE (Título ou ISBN)
+  const isbnMatch = query.match(/\d{10,13}/);
+  if (isbnMatch) {
+    const book = inventory.find(b => b.isbn === isbnMatch[0]);
+    if (book) {
+      return {
+        responseText: `Encontrei no estoque! O livro "${book.title}" está disponível por R$ ${Number(book.price).toFixed(2)}. Temos ${book.stockCount} unidades.`,
+        recommendedBooks: [book],
+        isLocalResponse: true
+      };
+    }
+  }
+
+  // 2. IA COM CONTEXTO HÍBRIDO (ESTOQUE + REGRAS + METAS)
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key não configurada");
+
   const ai = new GoogleGenAI({ apiKey });
   const model = "gemini-3-flash-preview"; 
+
+  // Status de Metas de Hoje
+  const today = new Date().toISOString().split('T')[0];
+  const todayGoal = salesGoals.find(g => g.date === today) || { actualSales: 0, minGoal: 0, superGoal: 0 };
   
-  const activeRules = knowledgeBase
-    .filter(k => k.active)
-    .map(k => `REGRA: ${k.content}`)
-    .join('\n');
+  const salesStatus = `STATUS DE VENDAS HOJE:
+- Vendido até agora: R$ ${todayGoal.actualSales.toLocaleString('pt-BR')}
+- Meta Mínima: R$ ${todayGoal.minGoal.toLocaleString('pt-BR')}
+- Super Meta: R$ ${todayGoal.superGoal.toLocaleString('pt-BR')}
+- Falta para meta mínima: R$ ${Math.max(0, todayGoal.minGoal - todayGoal.actualSales).toLocaleString('pt-BR')}`;
 
-  const systemInstruction = `Você é o NOBELINO, assistente oficial da Livraria Nobel.
-IDENTIDADE: Coruja amarela simpática de camisa polo preta da Nobel.
-CONTEXTO: Vendedor experiente, culto e ágil.
-REGRAS ATIVAS:
-${activeRules}
+  const manualContext = activeRules.length > 0 
+    ? activeRules.map(k => `REGRA [${k.topic}]: ${k.content}`).join('\n\n')
+    : "Nenhuma regra de treinamento cadastrada.";
 
-Se o cliente perguntar algo sobre livros, use a ferramenta 'consultarEstoque'. 
-Se perguntar algo geral ou atual, use a ferramenta 'googleSearch'.
-Responda de forma vendedora e carismática.`;
+  const stockContext = inventory.slice(0, 30).map(b => 
+    `- ${b.title} (ISBN: ${b.isbn}) | Preço: R$ ${b.price} | Estoque: ${b.stockCount}`
+  ).join('\n');
 
-  const contents = history.slice(-5).map(msg => ({
-    role: msg.role === 'assistant' ? 'model' : 'user' as any,
-    parts: [{ text: msg.content }]
-  }));
-  contents.push({ role: 'user', parts: [{ text: query }] });
+  const systemInstruction = `Você é o NOBELINO, o assistente inteligente da Livraria Nobel.
+
+${salesStatus}
+
+MANUAL DA LOJA (REGRAS):
+${manualContext}
+
+ESTOQUE EM DESTAQUE:
+${stockContext}
+
+INSTRUÇÕES:
+1. Use as informações de VENDAS para motivar o vendedor se ele perguntar como está o dia.
+2. Priorize as REGRAS e o ESTOQUE para responder dúvidas técnicas.
+3. Se perguntarem sobre preços, use o ESTOQUE acima.
+4. Se o vendedor bater a meta, parabenize-o com entusiasmo!`;
 
   try {
     const response = await ai.models.generateContent({
       model,
-      contents,
+      contents: [
+        ...history.slice(-6).map(m => ({ 
+          role: m.role === 'user' ? 'user' : 'model' as any, 
+          parts: [{ text: m.content }] 
+        })),
+        { role: 'user', parts: [{ text: query }] }
+      ],
       config: { 
-        systemInstruction, 
-        tools: [{ functionDeclarations: [consultarEstoqueFunction] }, { googleSearch: {} }],
+        systemInstruction,
+        temperature: 0.1,
+        maxOutputTokens: 1000
       }
     });
 
-    const candidate = response.candidates?.[0];
-    const functionCalls = response.functionCalls;
-
-    if (functionCalls && functionCalls.length > 0) {
-      const fc = functionCalls[0];
-      const termo = String((fc as any).args?.termo || "").toLowerCase();
-      const matches = inventory.filter(b => 
-        b.title.toLowerCase().includes(termo) || b.author.toLowerCase().includes(termo)
-      ).slice(0, 3);
-
-      const secondTurn = await ai.models.generateContent({
-        model,
-        contents: [
-          ...contents, 
-          { role: 'model', parts: candidate?.content?.parts || [] },
-          { 
-            role: 'user', 
-            parts: [{ 
-              functionResponse: { 
-                name: fc.name, 
-                id: fc.id, 
-                response: { result: matches.length > 0 ? "Livros encontrados no sistema" : "Nenhum livro encontrado com esse nome no estoque atual" } 
-              } 
-            }] 
-          }
-        ],
-        config: { systemInstruction }
-      });
-
-      return {
-        responseText: secondTurn.text || "Verifiquei nosso estoque para você.",
-        recommendedBooks: matches
-      };
-    }
-
     return {
-      responseText: response.text || "Olá! Como posso ajudar na Nobel hoje?",
-      recommendedBooks: []
+      responseText: response.text || "Vou verificar isso com o gerente.",
+      recommendedBooks: [],
+      isLocalResponse: false
     };
-  } catch (error: any) {
-    if (error.message?.includes("entity was not found")) {
-      // @ts-ignore
-      await window.aistudio.openSelectKey();
-      throw new Error("Por favor, selecione uma chave válida.");
-    }
-    throw error;
+  } catch (error) {
+    return {
+      responseText: "Tive um problema ao acessar meu cérebro digital.",
+      recommendedBooks: [],
+      isLocalResponse: true
+    };
   }
-}
-
-export async function speakText(text: string): Promise<string | undefined> {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) return undefined;
-  const ai = new GoogleGenAI({ apiKey });
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: text.slice(0, 200) }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-      },
-    });
-    return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  } catch (e) { return undefined; }
 }

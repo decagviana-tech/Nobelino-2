@@ -46,45 +46,89 @@ export const db = {
     });
   },
 
+  async addKnowledge(topic: string, content: string) {
+    const current = await this.get('nobel_knowledge_base') || [];
+    const newEntry = {
+      id: Date.now().toString(),
+      topic,
+      content,
+      type: 'rule',
+      active: true
+    };
+    const updated = [newEntry, ...current];
+    await this.save('nobel_knowledge_base', updated);
+    return newEntry;
+  },
+
+  async addProcess(name: string, steps: string[]) {
+    const current = await this.get('nobel_processes') || [];
+    const newProcess = {
+      id: Date.now().toString(),
+      name,
+      steps,
+      category: 'venda'
+    };
+    const updated = [newProcess, ...current];
+    await this.save('nobel_processes', updated);
+    return newProcess;
+  },
+
+  // Fix: Updated syncInventory to return results count (added/updated) to fix type error in InventoryManager
   async syncInventory(incomingBooks: any[]) {
     const inventory = await this.get('nobel_inventory') || [];
-    let updatedCount = 0;
-    let addedCount = 0;
     const updatedInventory = [...inventory];
-
+    let added = 0;
+    let updated = 0;
     incomingBooks.forEach(incoming => {
-      const existingIndex = updatedInventory.findIndex(b => b.isbn === incoming.isbn);
-      if (existingIndex !== -1) {
-        updatedInventory[existingIndex] = {
-          ...updatedInventory[existingIndex],
-          title: incoming.title || updatedInventory[existingIndex].title,
-          author: incoming.author || updatedInventory[existingIndex].author,
-          description: incoming.description || updatedInventory[existingIndex].description,
-          genre: incoming.genre || updatedInventory[existingIndex].genre,
-          price: incoming.price !== undefined ? incoming.price : updatedInventory[existingIndex].price,
-          stockCount: incoming.stockCount !== undefined ? incoming.stockCount : updatedInventory[existingIndex].stockCount,
-          enriched: incoming.description ? true : updatedInventory[existingIndex].enriched
-        };
-        updatedCount++;
+      const isbnStr = String(incoming.ISBN || incoming.isbn || "");
+      const idx = updatedInventory.findIndex(b => b.isbn === isbnStr);
+      if (idx !== -1) {
+        updatedInventory[idx] = { ...updatedInventory[idx], ...incoming };
+        updated++;
       } else {
         updatedInventory.push({
           id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-          title: incoming.title || "Livro sem título",
-          author: incoming.author || "Autor desconhecido",
-          isbn: incoming.isbn,
-          description: incoming.description || "",
-          genre: incoming.genre || "Geral",
-          targetAge: incoming.targetAge || "Livre",
-          price: incoming.price || 0,
-          stockCount: incoming.stockCount || 0,
-          enriched: !!incoming.description
+          title: incoming.title || incoming.Title || "Sem título",
+          author: incoming.author || incoming.Author || "Desconhecido",
+          isbn: isbnStr,
+          price: Number(incoming.price || incoming.Price || 0),
+          stockCount: Number(incoming.stockCount || incoming.Stock || 0),
+          description: incoming.description || ""
         });
-        addedCount++;
+        added++;
       }
     });
-
     await this.save('nobel_inventory', updatedInventory);
-    return { addedCount, updatedCount };
+    return { added, updated };
+  },
+
+  async updateDailySales(amount: number) {
+    const today = new Date().toISOString().split('T')[0];
+    const goals = await this.get('nobel_sales_goals') || [];
+    let todayGoal = goals.find((g: any) => g.date === today);
+    if (!todayGoal) {
+      todayGoal = { id: today, date: today, minGoal: 0, superGoal: 0, actualSales: 0 };
+      goals.push(todayGoal);
+    }
+    todayGoal.actualSales += amount;
+    await this.save('nobel_sales_goals', goals);
+    return todayGoal;
+  },
+
+  // Fix: Added setDailyGoal method to correctly save min and super goals for the current day to fix type error in Dashboard
+  async setDailyGoal(minGoal: number, superGoal: number) {
+    const today = new Date().toISOString().split('T')[0];
+    const goals = await this.get('nobel_sales_goals') || [];
+    let todayGoal = goals.find((g: any) => g.date === today);
+    if (!todayGoal) {
+      todayGoal = { id: today, date: today, minGoal, superGoal, actualSales: 0 };
+      goals.push(todayGoal);
+    } else {
+      todayGoal.minGoal = minGoal;
+      todayGoal.superGoal = superGoal;
+    }
+    await this.save('nobel_sales_goals', goals);
+    return todayGoal;
   },
 
   async exportBrain() {
@@ -118,93 +162,5 @@ export const db = {
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
-  },
-
-  async updateStockAndSales(sales: {isbn: string, quantity: number, price?: number}[], targetDate: string, overwrite: boolean = false) {
-    const inventory = await this.get('nobel_inventory') || [];
-    const goals = await this.get('nobel_sales_goals') || [];
-    const salesLog = await this.get('nobel_daily_sales_log') || {};
-
-    const dateToUpdate = targetDate;
-    const currentInventory = [...inventory];
-    const currentGoals = [...goals];
-    const currentLog = { ...salesLog };
-
-    // Agrupar vendas
-    const newFileSales = sales.reduce((acc, curr) => {
-      if (!acc[curr.isbn]) acc[curr.isbn] = { quantity: 0, totalPrice: 0, hasPrice: false };
-      acc[curr.isbn].quantity += curr.quantity;
-      if (curr.price !== undefined && !isNaN(curr.price)) {
-        acc[curr.isbn].totalPrice += (curr.price * curr.quantity);
-        acc[curr.isbn].hasPrice = true;
-      }
-      return acc;
-    }, {} as Record<string, { quantity: number, totalPrice: number, hasPrice: boolean }>);
-
-    // Reversão de estoque para o dia (se modo sobrescrever)
-    if (overwrite && currentLog[dateToUpdate]) {
-      const previousSales = currentLog[dateToUpdate];
-      for (const isbn in previousSales) {
-        const bookIdx = currentInventory.findIndex(b => b.isbn === isbn);
-        if (bookIdx !== -1) {
-          currentInventory[bookIdx].stockCount += previousSales[isbn];
-        }
-      }
-      currentLog[dateToUpdate] = {};
-    }
-
-    let totalFinancialValue = 0;
-    let totalQuantitySubtracted = 0;
-    let spreadsheetRowsCount = Object.keys(newFileSales).length;
-    const dailyDetail = currentLog[dateToUpdate] || {};
-
-    for (const isbn in newFileSales) {
-      const sale = newFileSales[isbn];
-      const bookIdx = currentInventory.findIndex(b => b.isbn === isbn);
-      
-      // CALCULA VALOR FINANCEIRO SEMPRE (Mesmo que não tenha o livro no acervo)
-      if (sale.hasPrice) {
-        totalFinancialValue += sale.totalPrice;
-      } else if (bookIdx !== -1) {
-        totalFinancialValue += (currentInventory[bookIdx].price * sale.quantity);
-      }
-
-      // BAIXA ESTOQUE APENAS SE O LIVRO EXISTIR
-      if (bookIdx !== -1) {
-        currentInventory[bookIdx].stockCount = Math.max(0, currentInventory[bookIdx].stockCount - sale.quantity);
-        totalQuantitySubtracted += sale.quantity;
-        dailyDetail[isbn] = (dailyDetail[isbn] || 0) + sale.quantity;
-      }
-    }
-
-    currentLog[dateToUpdate] = dailyDetail;
-
-    // Atualizar Metas
-    const existingGoalIndex = currentGoals.findIndex((g: any) => g.date === dateToUpdate);
-    if (existingGoalIndex !== -1) {
-      if (overwrite) {
-        currentGoals[existingGoalIndex].actualSales = totalFinancialValue;
-      } else {
-        currentGoals[existingGoalIndex].actualSales += totalFinancialValue;
-      }
-    } else {
-      currentGoals.push({
-        id: Date.now().toString(),
-        date: dateToUpdate,
-        minGoal: 0,
-        superGoal: 0,
-        actualSales: totalFinancialValue
-      });
-    }
-
-    await this.save('nobel_inventory', currentInventory);
-    await this.save('nobel_sales_goals', currentGoals);
-    await this.save('nobel_daily_sales_log', currentLog);
-
-    return {
-      itemsUpdated: spreadsheetRowsCount,
-      totalValue: totalFinancialValue,
-      stockSubtracted: totalQuantitySubtracted
-    };
   }
 };

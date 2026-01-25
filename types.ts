@@ -28,6 +28,13 @@ export interface KnowledgeEntry {
   active: boolean;
 }
 
+export interface PortableProcess {
+  id: string;
+  name: string;
+  steps: string[];
+  category: 'venda' | 'organizacao' | 'atendimento';
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -36,6 +43,8 @@ export interface ChatMessage {
   groundingUrls?: { uri: string; title: string }[];
   advisorNotes?: string;
   isQuotaError?: boolean;
+  estimatedCost?: number;
+  isLocalResponse?: boolean;
 }
 
 export interface UsageMetrics {
@@ -44,9 +53,6 @@ export interface UsageMetrics {
   lastResetDate: string;
   totalTokensEstimate: number;
   usageLimit?: number;
-}
-
-export interface SaleUpdate {
-  isbn: string;
-  quantity: number;
+  estimatedTotalCost: number;
+  localResolutionsCount: number;
 }

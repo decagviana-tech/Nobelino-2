@@ -92,7 +92,7 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
             if (isClosingRef.current) return;
 
             if (message.serverContent?.outputTranscription) {
-              setTranscript(prev => prev + " " + (message.serverContent?.outputTranscription?.text || ''));
+              setTranscript(message.serverContent.outputTranscription.text);
             }
             
             const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
@@ -107,7 +107,10 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
               source.connect(ctx.destination);
               source.onended = () => {
                 sourcesRef.current.delete(source);
-                if (sourcesRef.current.size === 0) setIsSpeaking(false);
+                if (sourcesRef.current.size === 0) {
+                  setIsSpeaking(false);
+                  setTranscript('');
+                }
               };
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
@@ -121,7 +124,9 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
               setIsSpeaking(false);
             }
           },
-          onclose: () => stopSession(),
+          onclose: () => {
+            if (!isClosingRef.current) stopSession();
+          },
           onerror: (e) => {
             console.error(e);
             setError("Falha na conexão de voz.");
@@ -130,7 +135,11 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          systemInstruction: `VOCÊ É O NOBELINO. Comece cumprimentando o vendedor com "Olá! Nobelino no balcão!". Seja prestativo, use uma voz amigável e entusiasmada.`
+          systemInstruction: `VOCÊ É O NOBELINO, assistente de voz da Livraria Nobel. 
+          Use as informações de estoque e regras da loja para ajudar.
+          ESTOQUE: ${inventory.slice(0, 10).map(b => b.title).join(', ')}...
+          REGRAS: ${knowledge.map(k => k.topic).join(', ')}
+          Seja breve e motivador.`
         }
       });
 
@@ -142,9 +151,9 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
 
   const stopSession = async () => {
     isClosingRef.current = true;
-    if (sessionRef.current) sessionRef.current.close();
-    if (audioContextRef.current) audioContextRef.current.close();
-    if (outputAudioContextRef.current) outputAudioContextRef.current.close();
+    if (sessionRef.current) try { sessionRef.current.close(); } catch(e) {}
+    if (audioContextRef.current) try { audioContextRef.current.close(); } catch(e) {}
+    if (outputAudioContextRef.current) try { outputAudioContextRef.current.close(); } catch(e) {}
     setIsActive(false);
     setIsListening(false);
     setIsSpeaking(false);
@@ -156,27 +165,47 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8">
+    <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 animate-in fade-in duration-300">
       <div className="absolute top-8 right-8">
-        <button onClick={onClose} className="w-16 h-16 bg-zinc-800 text-white rounded-full flex items-center justify-center text-xl">✕</button>
+        <button 
+          onClick={onClose} 
+          className="w-14 h-14 bg-zinc-800 text-white rounded-2xl flex items-center justify-center text-xl hover:bg-zinc-700 transition-all border border-zinc-700"
+        >
+          ✕
+        </button>
       </div>
 
-      <div className="relative mb-16">
+      <div className="relative mb-12">
         {(isListening || isSpeaking) && (
-          <div className={`absolute inset-0 rounded-full bg-yellow-400/20 animate-ping ${isSpeaking ? 'scale-150' : 'scale-110'}`}></div>
+          <div className={`absolute inset-0 rounded-full bg-yellow-400/20 animate-ping duration-[2s] ${isSpeaking ? 'scale-150' : 'scale-110'}`}></div>
         )}
-        <div className="w-64 h-64 relative z-10">
-          <Mascot animated talking={isSpeaking} className="w-full h-full" />
+        <div className={`w-64 h-64 relative z-10 transition-transform duration-300 ${isSpeaking ? 'scale-110' : 'scale-100'}`}>
+          <Mascot animated talking={isSpeaking} className="w-full h-full" mood={isSpeaking ? 'happy' : 'thinking'} />
         </div>
       </div>
 
-      <div className="text-center max-w-3xl space-y-4">
-        <h2 className={`font-black text-xs uppercase tracking-[0.5em] ${error ? 'text-red-500' : 'text-yellow-400'}`}>
-          {error ? 'ERRO DE VOZ' : isSpeaking ? 'NOBELINO FALANDO' : 'OUVINDO...'}
-        </h2>
-        <p className="text-zinc-100 text-2xl font-bold italic h-20 overflow-hidden">
-          {transcript || "Nobelino está pronto para ouvir..."}
-        </p>
+      <div className="text-center max-w-2xl space-y-6">
+        <div className="space-y-2">
+           <h2 className={`font-black text-[10px] uppercase tracking-[0.6em] transition-colors ${error ? 'text-red-500' : isSpeaking ? 'text-yellow-400' : 'text-zinc-500'}`}>
+            {error ? 'ERRO DE CONEXÃO' : isSpeaking ? 'NOBELINO RESPONDENDO' : 'PODE FALAR, ESTOU OUVINDO'}
+          </h2>
+          <div className="h-1 w-24 bg-zinc-900 mx-auto rounded-full overflow-hidden">
+             {(isListening || isSpeaking) && <div className="h-full bg-yellow-400 animate-pulse w-full"></div>}
+          </div>
+        </div>
+
+        <div className="bg-zinc-900/40 p-8 rounded-[32px] border border-zinc-800 min-h-[120px] flex items-center justify-center">
+           <p className="text-zinc-100 text-xl font-medium leading-relaxed italic opacity-90">
+            {transcript || (error ? "Houve um problema com o microfone." : "Diga algo como 'Como estão as vendas?'...") }
+          </p>
+        </div>
+
+        <button 
+          onClick={onClose}
+          className="text-zinc-500 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors"
+        >
+          Encerrar Chamada de Voz
+        </button>
       </div>
     </div>
   );
