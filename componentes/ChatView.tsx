@@ -38,8 +38,11 @@ const ChatView: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    // Timeout para garantir que o scroll ocorra após a renderização do conteúdo
+    setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  }, [messages, isLoading]);
 
   const resetChat = async () => {
     const initialMsg: ChatMessage = { role: 'assistant', content: "🦉 Nobelino no balcão! Como posso ajudar a Livraria Nobel hoje?", timestamp: new Date() };
@@ -48,23 +51,15 @@ const ChatView: React.FC = () => {
   };
 
   const saveAsRule = async (index: number, content: string) => {
-    setSavingId(index); // Estado de "Salvando..."
-    
-    // Sugere um título baseado no conteúdo (primeiros 30 caracteres)
-    const suggestedTitle = content.substring(0, 30).split('\n')[0].replace('🦉', '').trim() + '...';
+    setSavingId(index);
+    const suggestedTitle = content.substring(0, 30).split('\n')[0].replace('🦉', '').replace(/[#*]/g, '').trim() + '...';
     const topic = prompt("Dê um título para esta regra de conhecimento:", suggestedTitle);
     
-    if (topic !== null) { // Se não cancelou
+    if (topic !== null) {
       const finalTopic = topic.trim() || "Regra Manual";
       await db.addKnowledge(finalTopic, content);
-      
-      // Notifica o sistema para atualizar o ícone de notificação no menu
       window.dispatchEvent(new CustomEvent('nobel_rule_saved'));
-      
-      // Recarrega os dados locais para atualizar o contador no header
       await load();
-      
-      // Mantém o estado de sucesso por 2 segundos
       setTimeout(() => setSavingId(null), 2000);
     } else {
       setSavingId(null);
@@ -101,7 +96,7 @@ const ChatView: React.FC = () => {
       setCurrentMood('tired');
       const errorMsg: ChatMessage = { 
         role: 'assistant', 
-        content: `🦉 Tive um problema ao acessar meu banco de dados. Pode repetir?`, 
+        content: `🦉 Tive um problema ao processar essa informação agora. Pode repetir?`, 
         timestamp: new Date() 
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -130,7 +125,7 @@ const ChatView: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                   <span className="text-[8px] font-black text-zinc-500 uppercase tracking-tighter">
-                    {inventory.length} LIVROS + {knowledge.length} REGRAS
+                    SINCRO: {inventory.length} LIVROS | {knowledge.length} REGRAS
                   </span>
                 </div>
              </div>
@@ -138,14 +133,17 @@ const ChatView: React.FC = () => {
           <button onClick={resetChat} title="Limpar Conversa" className="p-2.5 bg-zinc-900 rounded-xl text-zinc-500 hover:text-white transition-colors">🗑️</button>
        </header>
 
-       <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+       <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-12">
          {messages.map((m, i) => (
            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`group relative max-w-[85%] p-6 rounded-[32px] text-sm leading-relaxed shadow-2xl ${m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800'}`}>
-                <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                {/* Renderização de texto garantindo que quebras de linha e markdown básico sejam visíveis */}
+                <div className="whitespace-pre-wrap break-words prose prose-invert prose-sm">
+                  {m.content}
+                </div>
                 
                 {m.role === 'assistant' && (
-                  <div className="mt-5 flex flex-wrap gap-3 justify-between items-center border-t border-white/5 pt-4">
+                  <div className="mt-6 flex flex-wrap gap-3 justify-between items-center border-t border-white/5 pt-4">
                     <button 
                       onClick={() => saveAsRule(i, m.content)}
                       className={`text-[9px] font-black uppercase px-4 py-2.5 rounded-xl transition-all active:scale-95 flex items-center gap-2 ${
@@ -180,14 +178,15 @@ const ChatView: React.FC = () => {
            </div>
          ))}
          {isLoading && (
-           <div className="flex justify-start">
-              <div className="bg-zinc-900/50 text-yellow-400/50 px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-[0.2em] border border-yellow-400/10 animate-pulse">Consultando Nobelino...</div>
+           <div className="flex justify-start items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center animate-spin border-2 border-yellow-400 border-t-transparent"></div>
+              <div className="bg-zinc-900/50 text-yellow-400/70 px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-[0.2em] border border-yellow-400/10">Consultando Nobelino...</div>
            </div>
          )}
          <div ref={chatEndRef} />
        </div>
 
-       <div className="p-6 bg-zinc-950 border-t border-zinc-900">
+       <div className="p-6 bg-zinc-950 border-t border-zinc-900 relative z-20">
           <div className="max-w-4xl mx-auto flex gap-3">
              <button 
                onClick={() => setIsVoiceOpen(true)}
@@ -202,14 +201,14 @@ const ChatView: React.FC = () => {
                onChange={e => setInput(e.target.value)} 
                onKeyDown={e => e.key === 'Enter' && handleSend()}
                placeholder="Pergunte sobre a loja ou estoque..." 
-               className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-6 py-4 text-white focus:border-yellow-400 outline-none transition-all placeholder:text-zinc-700 font-medium" 
+               className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-6 py-4 text-white focus:border-yellow-400 outline-none transition-all placeholder:text-zinc-800 font-medium" 
                disabled={isLoading}
              />
              
              <button 
                onClick={handleSend} 
                disabled={isLoading || !input.trim()} 
-               className="bg-yellow-400 disabled:opacity-30 text-black px-8 rounded-2xl font-black uppercase text-xs hover:bg-yellow-300 transition-all active:scale-95 shadow-xl shadow-yellow-400/5"
+               className="bg-yellow-400 disabled:opacity-30 text-black px-8 rounded-2xl font-black uppercase text-xs hover:bg-yellow-300 transition-all active:scale-95 shadow-xl shadow-yellow-400/10"
              >
                Vender
              </button>

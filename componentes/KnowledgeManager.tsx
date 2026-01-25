@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
-import { KnowledgeEntry, PortableProcess } from '../types';
+import { KnowledgeEntry, PortableProcess, Book } from '../types';
 
 const KnowledgeManager: React.FC = () => {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
   const [processes, setProcesses] = useState<PortableProcess[]>([]);
+  const [inventory, setInventory] = useState<Book[]>([]);
   const [activeTab, setActiveTab] = useState<'regras' | 'processos' | 'sincronia'>('regras');
   
   // States para novas entradas
@@ -20,8 +21,10 @@ const KnowledgeManager: React.FC = () => {
   const load = async () => {
     const kData = await db.get('nobel_knowledge_base') || [];
     const pData = await db.get('nobel_processes') || [];
+    const iData = await db.get('nobel_inventory') || [];
     setEntries(kData.sort((a, b) => Number(b.id) - Number(a.id)));
     setProcesses(pData.sort((a, b) => Number(b.id) - Number(a.id)));
+    setInventory(iData);
   };
 
   useEffect(() => { 
@@ -55,10 +58,11 @@ const KnowledgeManager: React.FC = () => {
   };
 
   const generateSyncDNA = () => {
-    // DNA foca apenas no "Conhecimento" (Regras + Processos)
+    // Agora o DNA foca em TUDO (Regras + Processos + Estoque) para portabilidade real
     const dna = {
       rules: entries,
       processes: processes,
+      inventory: inventory,
       exportedAt: new Date().toISOString()
     };
     const code = btoa(unescape(encodeURIComponent(JSON.stringify(dna))));
@@ -81,7 +85,14 @@ const KnowledgeManager: React.FC = () => {
       const mergedProcesses = [...decoded.processes, ...currentProcesses].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
       await db.save('nobel_processes', mergedProcesses);
 
-      alert("🧬 Inteligência Portátil sincronizada com sucesso!");
+      // Merge/Import de Estoque se disponível no DNA
+      if (decoded.inventory) {
+        const currentInv = await db.get('nobel_inventory') || [];
+        const mergedInv = [...decoded.inventory, ...currentInv].filter((v, i, a) => a.findIndex(t => t.isbn === v.isbn) === i);
+        await db.save('nobel_inventory', mergedInv);
+      }
+
+      alert("🧬 Sincronia Portátil Concluída! Regras, Processos e Estoque integrados.");
       load();
     } catch (e) {
       alert("Erro ao ler DNA. Verifique se o código está completo.");
@@ -190,7 +201,7 @@ const KnowledgeManager: React.FC = () => {
                  <div className="p-6 bg-zinc-950 border border-zinc-800 rounded-[32px] hover:border-blue-500/30 transition-all group">
                     <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-400 text-xl mx-auto mb-4 group-hover:scale-110 transition-transform">🧬</div>
                     <h4 className="text-white font-black uppercase text-[10px] mb-2">DNA de Conhecimento</h4>
-                    <p className="text-[9px] text-zinc-600 mb-6 leading-relaxed">Copia apenas as Regras e Processos que você criou.</p>
+                    <p className="text-[9px] text-zinc-600 mb-6 leading-relaxed">Copia Regras, Processos e Estoque que você criou.</p>
                     <button onClick={generateSyncDNA} className="w-full bg-zinc-900 text-zinc-300 py-3 rounded-xl font-black uppercase text-[10px] hover:bg-zinc-800 border border-zinc-800">Gerar Código DNA</button>
                  </div>
 

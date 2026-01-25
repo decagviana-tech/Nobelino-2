@@ -53,7 +53,7 @@ export async function processUserQuery(
     ? activeRules.map(k => `REGRA [${k.topic}]: ${k.content}`).join('\n\n')
     : "Nenhuma regra de treinamento cadastrada.";
 
-  const stockContext = inventory.slice(0, 30).map(b => 
+  const stockContext = inventory.slice(0, 50).map(b => 
     `- ${b.title} (ISBN: ${b.isbn}) | Preço: R$ ${b.price} | Estoque: ${b.stockCount}`
   ).join('\n');
 
@@ -61,23 +61,24 @@ export async function processUserQuery(
 
 ${salesStatus}
 
-MANUAL DA LOJA (REGRAS):
+MANUAL DA LOJA (REGRAS E PROCESSOS):
 ${manualContext}
 
 ESTOQUE EM DESTAQUE:
 ${stockContext}
 
 INSTRUÇÕES:
-1. Use as informações de VENDAS para motivar o vendedor se ele perguntar como está o dia.
-2. Priorize as REGRAS e o ESTOQUE para responder dúvidas técnicas.
-3. Se perguntarem sobre preços, use o ESTOQUE acima.
-4. Se o vendedor bater a meta, parabenize-o com entusiasmo!`;
+1. Responda SEMPRE de forma completa. Nunca corte frases ou valores monetários.
+2. Se houver promoções (como a Matilda por 47,90), garanta que o valor completo seja escrito.
+3. Priorize as REGRAS e o ESTOQUE para responder dúvidas técnicas.
+4. Se perguntarem sobre preços, use o ESTOQUE acima.
+5. Seja entusiasmado e use emojis moderadamente.`;
 
   try {
     const response = await ai.models.generateContent({
       model,
       contents: [
-        ...history.slice(-6).map(m => ({ 
+        ...history.slice(-10).map(m => ({ 
           role: m.role === 'user' ? 'user' : 'model' as any, 
           parts: [{ text: m.content }] 
         })),
@@ -86,7 +87,7 @@ INSTRUÇÕES:
       config: { 
         systemInstruction,
         temperature: 0.1,
-        maxOutputTokens: 1000
+        maxOutputTokens: 2048 // Aumentado para evitar truncamento como o "R$ 4" incompleto
       }
     });
 
@@ -96,8 +97,9 @@ INSTRUÇÕES:
       isLocalResponse: false
     };
   } catch (error) {
+    console.error("Erro na IA:", error);
     return {
-      responseText: "Tive um problema ao acessar meu cérebro digital.",
+      responseText: "Tive um problema ao processar essa informação agora.",
       recommendedBooks: [],
       isLocalResponse: true
     };
