@@ -25,7 +25,7 @@ const App: React.FC = () => {
     const today = new Date().toISOString().split('T')[0];
     let metrics: UsageMetrics = await db.get('nobel_usage_metrics');
     
-    // Lógica de Reset Diário: Se não existe ou o dia mudou, reseta o uso
+    // Se não existir ou o dia mudou, reseta o uso automaticamente
     if (!metrics || metrics.lastResetDate !== today) {
       metrics = {
         dailyRequests: 0,
@@ -48,7 +48,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    // Escuta atualizações de uso vindas de outros componentes
     window.addEventListener('nobel_usage_updated', loadData);
     return () => window.removeEventListener('nobel_usage_updated', loadData);
   }, []);
@@ -65,7 +64,7 @@ const App: React.FC = () => {
           {isSidebarOpen && (
             <div className="animate-in fade-in duration-500">
               <h1 className="font-black text-lg tracking-tighter text-white">NOBEL<span className="text-yellow-400">.</span></h1>
-              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Vendedor Digital</p>
+              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Digital Vendedor</p>
             </div>
           )}
         </div>
@@ -73,17 +72,17 @@ const App: React.FC = () => {
         <nav className="flex-1 px-3 space-y-2 mt-4 overflow-y-auto custom-scrollbar">
           <NavItem icon="🦉" label="Consultoria" active={view === 'chat'} onClick={() => setView('chat')} collapsed={!isSidebarOpen} />
           <NavItem icon="🎙️" label="Voz Live" active={view === 'voice'} onClick={() => setView('voice')} collapsed={!isSidebarOpen} />
-          <NavItem icon="📈" label="Metas" active={view === 'dashboard'} onClick={() => setView('dashboard')} collapsed={!isSidebarOpen} />
           <NavItem icon="📚" label="Estoque" active={view === 'inventory'} onClick={() => setView('inventory')} collapsed={!isSidebarOpen} />
           <NavItem icon="🧠" label="Regras" active={view === 'knowledge'} onClick={() => setView('knowledge')} collapsed={!isSidebarOpen} />
+          <NavItem icon="💾" label="Sincronização" active={view === 'memory'} onClick={() => setView('memory')} collapsed={!isSidebarOpen} />
         </nav>
 
         <div className="p-4 border-t border-zinc-800 space-y-4">
           {isSidebarOpen && (
             <div className="px-2">
               <div className="flex justify-between text-[10px] font-black uppercase text-zinc-500 mb-1">
-                <span>Uso Diário</span>
-                <span>{usage}/{limit}</span>
+                <span>Uso do Dia</span>
+                <span className={usage >= limit ? 'text-red-500' : ''}>{usage}/{limit}</span>
               </div>
               <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                 <div 
@@ -93,10 +92,7 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-          <button 
-            onClick={() => setSidebarOpen(!isSidebarOpen)}
-            className="w-full py-2 bg-zinc-900 rounded-xl text-xs font-bold hover:bg-zinc-800 transition-colors"
-          >
+          <button onClick={() => setSidebarOpen(!isSidebarOpen)} className="w-full py-2 bg-zinc-900 rounded-xl text-xs font-bold hover:bg-zinc-800 transition-colors text-zinc-500">
             {isSidebarOpen ? 'Recolher Menu' : '→'}
           </button>
         </div>
@@ -116,12 +112,7 @@ const App: React.FC = () => {
 };
 
 const NavItem = ({ icon, label, active, onClick, collapsed }: any) => (
-  <button 
-    onClick={onClick}
-    className={`w-full flex items-center gap-4 px-4 py-3 rounded-2xl transition-all ${
-      active ? 'bg-yellow-400 text-black shadow-lg shadow-yellow-400/20' : 'text-zinc-400 hover:bg-zinc-900'
-    }`}
-  >
+  <button onClick={onClick} className={`w-full flex items-center gap-4 px-4 py-3 rounded-2xl transition-all ${active ? 'bg-yellow-400 text-black shadow-lg shadow-yellow-400/20' : 'text-zinc-400 hover:bg-zinc-900'}`}>
     <span className="text-xl">{icon}</span>
     {!collapsed && <span className="font-bold text-sm whitespace-nowrap">{label}</span>}
   </button>
