@@ -23,15 +23,32 @@ const App: React.FC = () => {
   const [hasKey, setHasKey] = useState<boolean | null>(null);
 
   const checkKey = async () => {
-    // @ts-ignore
-    const selected = await window.aistudio.hasSelectedApiKey();
-    setHasKey(selected);
+    try {
+      // @ts-ignore
+      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
+        const selected = await window.aistudio.hasSelectedApiKey();
+        setHasKey(selected);
+      } else {
+        // Se estiver fora do ambiente que suporta o seletor (ex: site direto no Netlify), 
+        // assume true para carregar o app usando a variável de ambiente process.env.API_KEY
+        setHasKey(true);
+      }
+    } catch (e) {
+      console.warn("Seletor de chaves não disponível, usando chave padrão.");
+      setHasKey(true);
+    }
   };
 
   const handleSelectKey = async () => {
-    // @ts-ignore
-    await window.aistudio.openSelectKey();
-    setHasKey(true);
+    try {
+      // @ts-ignore
+      if (window.aistudio && window.aistudio.openSelectKey) {
+        await window.aistudio.openSelectKey();
+      }
+      setHasKey(true);
+    } catch (e) {
+      setHasKey(true);
+    }
   };
 
   const loadData = async () => {
@@ -49,7 +66,7 @@ const App: React.FC = () => {
       await db.save('nobel_usage_metrics', metrics);
     }
     
-    setUsage(metrics.dailyRequests);
+    setUsage(metrics.dailyRequests || 0);
     setLimit(metrics.usageLimit || 1500);
 
     const inv = await db.get('nobel_inventory');
@@ -64,6 +81,9 @@ const App: React.FC = () => {
     window.addEventListener('nobel_usage_updated', loadData);
     return () => window.removeEventListener('nobel_usage_updated', loadData);
   }, []);
+
+  // Enquanto verifica, não mostra nada (evita flash)
+  if (hasKey === null) return <div className="h-screen w-full bg-[#09090b]"></div>;
 
   if (hasKey === false) {
     return (
@@ -98,8 +118,6 @@ const App: React.FC = () => {
       </div>
     );
   }
-
-  if (hasKey === null) return null;
 
   const usagePercent = Math.min(100, (usage / limit) * 100);
 
