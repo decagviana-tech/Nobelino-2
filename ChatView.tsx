@@ -13,7 +13,6 @@ const ChatView: React.FC = () => {
   const [salesGoals, setSalesGoals] = useState<SalesGoal[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [autoVoice, setAutoVoice] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentMood, setCurrentMood] = useState<'happy' | 'thinking' | 'surprised' | 'tired' | 'success'>('happy');
   const chatEndRef = useRef<HTMLDivElement>(null);

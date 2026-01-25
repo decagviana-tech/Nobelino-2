@@ -25,13 +25,13 @@ const KnowledgeManager: React.FC = () => {
   };
 
   return (
-    <div className="p-8 bg-zinc-950 h-full overflow-y-auto">
+    <div className="p-8 bg-zinc-950 h-full overflow-y-auto custom-scrollbar">
       <h2 className="text-3xl font-black text-white uppercase tracking-tighter mb-8">Treinar Nobelino</h2>
       
       <div className="bg-zinc-900 p-8 rounded-[32px] border border-zinc-800 mb-8">
          <div className="space-y-4">
-            <input value={topic} onChange={e => setTopic(e.target.value)} placeholder="Título da Regra (ex: Promoção Natal)" className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white outline-none focus:border-yellow-400" />
-            <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="Instrução para o Nobelino..." rows={4} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white outline-none focus:border-yellow-400" />
+            <input value={topic} onChange={e => setTopic(e.target.value)} placeholder="Título da Regra" className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white outline-none focus:border-yellow-400" />
+            <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="Instrução..." rows={4} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white outline-none focus:border-yellow-400" />
             <button onClick={save} className="w-full bg-yellow-400 text-black py-4 rounded-xl font-black uppercase text-xs">Gravar Regra</button>
          </div>
       </div>

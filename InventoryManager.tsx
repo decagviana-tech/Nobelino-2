@@ -28,8 +28,7 @@ const InventoryManager: React.FC = () => {
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json(ws);
-      // Lógica de sincronização aqui...
-      alert("Planilha lida com sucesso! (Funcionalidade de integração ativa)");
+      alert("Planilha lida com sucesso!");
     };
     reader.readAsBinaryString(file);
   };

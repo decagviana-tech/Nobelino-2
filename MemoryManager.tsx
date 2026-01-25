@@ -18,7 +18,7 @@ const MemoryManager: React.FC = () => {
     <div className="p-8 bg-zinc-950 h-full flex flex-col items-center justify-center text-center">
       <Mascot className="w-32 h-32 mb-8" animated />
       <h2 className="text-3xl font-black text-white uppercase tracking-tighter mb-4">Sincronização Master</h2>
-      <p className="text-zinc-500 text-sm max-w-md mb-8">Salve ou restaure todo o conhecimento do Nobelino (estoque, metas e regras) em um único arquivo.</p>
+      <p className="text-zinc-500 text-sm max-w-md mb-8">Salve ou restaure todo o conhecimento do Nobelino.</p>
       
       <div className="flex gap-4">
         <button onClick={exportData} className="bg-zinc-900 border border-zinc-800 text-white px-8 py-4 rounded-2xl font-black uppercase text-xs hover:border-yellow-400 transition-all">Exportar Backup</button>

@@ -19,7 +19,7 @@ const Dashboard: React.FC = () => {
   const percent = currentGoal.minGoal > 0 ? (currentGoal.actualSales / currentGoal.minGoal) * 100 : 0;
 
   return (
-    <div className="p-8 bg-zinc-950 h-full">
+    <div className="p-8 bg-zinc-950 h-full overflow-y-auto custom-scrollbar">
       <h2 className="text-3xl font-black text-white uppercase tracking-tighter mb-8">Metas Nobel</h2>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
