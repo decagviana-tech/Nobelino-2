@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, FunctionDeclaration, Modality } from "@google/genai";
 import type { Book, ChatMessage, KnowledgeEntry, SalesGoal } from "../types";
 
@@ -5,23 +6,16 @@ export interface AIResult {
   responseText: string;
   recommendedBooks: Book[];
   groundingUrls?: { uri: string; title: string }[];
-  isQuotaError?: boolean;
-  isAuthError?: boolean;
 }
 
 const consultarEstoqueFunction: FunctionDeclaration = {
   name: "consultarEstoque",
   parameters: {
     type: Type.OBJECT,
-    description: "Busca livros no estoque da Nobel por título, autor ou ISBN.",
+    description: "Busca livros no estoque da Nobel por título ou autor.",
     properties: { termo: { type: Type.STRING, description: "O nome do livro ou autor" } },
     required: ["termo"],
   },
-};
-
-const isRetryableError = (error: any) => {
-  const msg = JSON.stringify(error).toLowerCase();
-  return msg.includes('429') || msg.includes('quota') || msg.includes('limit');
 };
 
 export async function processUserQuery(
@@ -32,103 +26,76 @@ export async function processUserQuery(
   salesGoals: SalesGoal[] = []
 ): Promise<AIResult> {
   const apiKey = process.env.API_KEY;
-  if (!apiKey || apiKey.length < 10) return { responseText: "🦉 Chave ausente no Netlify.", recommendedBooks: [], isAuthError: true };
+  if (!apiKey) throw new Error("API Key missing");
 
   const ai = new GoogleGenAI({ apiKey });
-  const modelName = "gemini-3-flash-preview"; 
-  
-  const today = new Date().toISOString().split('T')[0];
-  const goal = salesGoals.find(g => g.date === today) || { actualSales: 0, minGoal: 0 };
+  const model = "gemini-3-flash-preview"; 
   
   const activeRules = knowledgeBase
     .filter(k => k.active)
-    .map(k => `REGRA [${k.topic}]: ${k.content}`)
+    .map(k => `REGRA: ${k.content}`)
     .join('\n');
 
   const systemInstruction = `Você é o NOBELINO, o assistente virtual da Livraria Nobel.
-IDENTIDADE: Você é uma corujinha amarela muito simpática que usa uma camisa polo preta da Nobel.
+IDENTIDADE: Uma corujinha amarela simpática com camisa polo preta da Nobel.
+REGRAS:
+${activeRules}
+Use ferramentas para consultar o estoque quando necessário. Seja um vendedor experiente.`;
 
-CONHECIMENTO DA LOJA:
-${activeRules || "Use seu bom senso de vendedor Nobel, mas sem inventar preços."}
-
-DADOS DE HOJE (${today}):
-- Meta do Deca: R$ ${goal.minGoal}
-- Vendas Atuais: R$ ${goal.actualSales}
-
-DIRETRIZES:
-1. Seja um vendedor consultivo. Se o cliente pedir indicação, use a ferramenta 'consultarEstoque'.
-2. Se a informação não estiver na sua base, diga: "Vou conferir com o Deca e já te falo!".
-3. Jamais invente promoções que não foram cadastradas.
-4. Mantenha o entusiasmo de quem ama livros!`;
-
-  const contents = history.slice(-4).map(msg => ({
+  const contents = history.slice(-5).map(msg => ({
     role: msg.role === 'assistant' ? 'model' : 'user' as any,
-    parts: [{ text: msg.content || "" }]
+    parts: [{ text: msg.content }]
   }));
   contents.push({ role: 'user', parts: [{ text: query }] });
 
-  try {
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents,
-      config: { 
-        systemInstruction, 
-        tools: [{ functionDeclarations: [consultarEstoqueFunction] }, { googleSearch: {} }], 
-        temperature: 0.1 
-      }
-    });
-
-    const candidate = response.candidates?.[0];
-    const functionCalls = response.functionCalls;
-
-    if (!functionCalls || functionCalls.length === 0) {
-      return {
-        responseText: response.text || "🦉 Como posso ajudar?",
-        recommendedBooks: [],
-        groundingUrls: candidate?.groundingMetadata?.groundingChunks
-          ?.filter((c: any) => c.web).map((c: any) => ({ uri: c.web.uri, title: c.web.title }))
-      };
+  const response = await ai.models.generateContent({
+    model,
+    contents,
+    config: { 
+      systemInstruction, 
+      tools: [{ functionDeclarations: [consultarEstoqueFunction] }, { googleSearch: {} }],
     }
+  });
 
-    const functionResponses = [];
-    const allMatches: Book[] = [];
+  const candidate = response.candidates?.[0];
+  const functionCalls = response.functionCalls;
 
-    for (const fc of functionCalls) {
-      const args = (fc as any).args;
-      const termo = String(args?.termo || "").toLowerCase();
-      
-      const matches = inventory.filter(b => 
-        b.title.toLowerCase().includes(termo) || 
-        b.isbn.includes(termo) || 
-        b.author.toLowerCase().includes(termo)
-      ).slice(0, 3);
-      
-      allMatches.push(...matches);
-      functionResponses.push({
-        functionResponse: { 
-          name: fc.name, 
-          id: fc.id, 
-          response: { result: matches.length > 0 ? "Livros encontrados." : "Não localizado." } 
-        }
-      });
-    }
+  if (functionCalls && functionCalls.length > 0) {
+    const fc = functionCalls[0];
+    const termo = String((fc as any).args?.termo || "").toLowerCase();
+    const matches = inventory.filter(b => 
+      b.title.toLowerCase().includes(termo) || b.author.toLowerCase().includes(termo)
+    ).slice(0, 3);
 
     const secondTurn = await ai.models.generateContent({
-      model: modelName,
-      contents: [...contents, { role: 'model', parts: candidate?.content?.parts || [] }, { role: 'user', parts: functionResponses as any }],
-      config: { systemInstruction, temperature: 0.1 }
+      model,
+      contents: [
+        ...contents, 
+        { role: 'model', parts: candidate?.content?.parts || [] },
+        { 
+          role: 'user', 
+          parts: [{ 
+            functionResponse: { 
+              name: fc.name, 
+              id: fc.id, 
+              response: { result: matches.length > 0 ? "Livros encontrados" : "Não encontrado" } 
+            } 
+          }] 
+        }
+      ],
+      config: { systemInstruction }
     });
 
     return {
-      responseText: secondTurn.text || "🦉 Consultei o estoque para você.",
-      recommendedBooks: allMatches,
-      groundingUrls: secondTurn.candidates?.[0]?.groundingMetadata?.groundingChunks?.filter((c: any) => c.web).map((c: any) => ({ uri: c.web.uri, title: c.web.title }))
+      responseText: secondTurn.text || "Consultei o estoque para você.",
+      recommendedBooks: matches
     };
-
-  } catch (error: any) {
-    if (isRetryableError(error)) return { responseText: "🦉 Minha quota de pensamento acabou por um minuto. Tenta de novo?", recommendedBooks: [], isQuotaError: true };
-    return { responseText: "🦉 Opa, tive um tropeço técnico. Pode repetir?", recommendedBooks: [] };
   }
+
+  return {
+    responseText: response.text || "Não entendi, pode repetir?",
+    recommendedBooks: []
+  };
 }
 
 export async function speakText(text: string): Promise<string | undefined> {
@@ -138,7 +105,7 @@ export async function speakText(text: string): Promise<string | undefined> {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: text.slice(0, 200) }] }], 
+      contents: [{ parts: [{ text: text.slice(0, 200) }] }],
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
@@ -146,33 +113,4 @@ export async function speakText(text: string): Promise<string | undefined> {
     });
     return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   } catch (e) { return undefined; }
-}
-
-export async function enrichBooks(books: Book[]): Promise<Partial<Book>[]> {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) return [];
-  const ai = new GoogleGenAI({ apiKey });
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Enriqueça estes ISBNs: ${books.map(b => b.isbn).join(',')}`,
-      config: { 
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              isbn: { type: Type.STRING },
-              author: { type: Type.STRING },
-              description: { type: Type.STRING },
-              genre: { type: Type.STRING },
-              targetAge: { type: Type.STRING }
-            }
-          }
-        }
-      }
-    });
-    return JSON.parse(response.text || "[]");
-  } catch (e) { return []; }
 }

@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 interface MascotProps {
@@ -32,24 +33,20 @@ const Mascot: React.FC<MascotProps> = ({ className, animated = false, talking = 
           `}
         </style>
         
-        {/* Pernas/Pés */}
+        {/* Pernas */}
         <path d="M40 85L38 92" stroke="#F97316" strokeWidth="3" strokeLinecap="round" />
         <path d="M60 85L62 92" stroke="#F97316" strokeWidth="3" strokeLinecap="round" />
         
-        {/* Corpo (Amarelo) */}
+        {/* Corpo */}
         <path d="M20 50C20 30 35 15 50 15C65 15 80 30 80 50V75C80 82 74 88 67 88H33C26 88 20 82 20 75V50Z" fill="#FACC15" />
         
-        {/* Camisa Polo Preta (Vendedor Nobel) */}
+        {/* Camisa Polo Preta Nobel */}
         <path d="M20 60C20 55 25 50 35 48H65C75 50 80 55 80 60V75C80 82 74 88 67 88H33C26 88 20 82 20 75V60Z" fill="#18181b" />
         
-        {/* Detalhe da Gola Nobel */}
+        {/* Detalhe Gola */}
         <path d="M42 48L50 58L58 48" stroke="#FACC15" strokeWidth="2.5" strokeLinecap="round" />
-        <circle cx="50" cy="65" r="1.5" fill="#FACC15" />
         
-        {/* Cabeça e Penas de Orelha */}
-        <path d="M30 22L22 12M70 22L78 12" stroke="#FACC15" strokeWidth="4" strokeLinecap="round" />
-        
-        {/* Olhos Expressivos */}
+        {/* Olhos */}
         <g className="eye-blink">
           {mood === 'tired' ? (
             <>
@@ -67,20 +64,14 @@ const Mascot: React.FC<MascotProps> = ({ className, animated = false, talking = 
             <>
               <circle cx="38" cy="38" r="10" fill="white" />
               <circle cx="62" cy="38" r="10" fill="white" />
-              <circle cx="38" cy="38" r="8" stroke="#18181b" strokeWidth="0.5" />
-              <circle cx="62" cy="38" r="8" stroke="#18181b" strokeWidth="0.5" />
-              <circle cx={mood === 'surprised' ? 38 : 40} cy={mood === 'thinking' ? 36 : 38} r="4" fill="#18181b" />
-              <circle cx={mood === 'surprised' ? 62 : 60} cy={mood === 'thinking' ? 36 : 38} r="4" fill="#18181b" />
+              <circle cx="38" cy="38" r="4" fill="#18181b" />
+              <circle cx="62" cy="38" r="4" fill="#18181b" />
             </>
           )}
         </g>
         
         {/* Bico */}
         <path className="beak-talk" d="M47 44L50 50L53 44H47Z" fill="#F97316" />
-        
-        {/* Asas Nobelinas */}
-        <path d="M18 55C14 60 14 70 18 75" stroke="#EAB308" strokeWidth="4" strokeLinecap="round" />
-        <path d="M82 55C86 60 86 70 82 75" stroke="#EAB308" strokeWidth="4" strokeLinecap="round" />
       </svg>
     </div>
   );
