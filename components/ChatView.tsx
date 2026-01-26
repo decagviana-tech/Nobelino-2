@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ChatMessage, Book, EstimateItem, Estimate, KnowledgeEntry, SalesGoal, PortableProcess } from '../types';
+import { ChatMessage, Book, KnowledgeEntry, PortableProcess } from '../types';
 import { INITIAL_INVENTORY } from '../data/mockInventory';
 import { processUserQuery } from '../services/geminiService';
 import { db } from '../services/db';
@@ -38,7 +38,7 @@ const ChatView: React.FC = () => {
   const resetChat = async () => {
     const initialMsg: ChatMessage = { 
       role: 'assistant', 
-      content: "Olá! Nobelino no balcão. Com qual colaborador da loja eu falo agora? 🦉", 
+      content: "🦉 Consultor Nobelino pronto para suporte ao balcão. Com qual colaborador eu falo agora?", 
       timestamp: new Date() 
     };
     setMessages([initialMsg]);
@@ -56,17 +56,13 @@ const ChatView: React.FC = () => {
     setCurrentMood('thinking');
 
     try {
-      const currentKnowledge = await db.get('nobel_knowledge_base') || [];
-      const currentProcesses = await db.get('nobel_processes') || [];
-      const currentInventory = await db.get('nobel_inventory') || INITIAL_INVENTORY;
-      
       const result = await processUserQuery(
         textToSend, 
-        currentInventory, 
+        inventory, 
         messages, 
-        currentKnowledge, 
+        knowledge, 
         [], 
-        currentProcesses
+        processes
       );
       
       const assistantMsg: ChatMessage = { 
@@ -96,52 +92,42 @@ const ChatView: React.FC = () => {
                 <Mascot animated={isLoading} mood={currentMood} />
              </div>
              <div>
-                <div className="flex items-center gap-2">
-                   <h2 className="text-sm font-black uppercase text-zinc-100">Nobelino</h2>
-                   {(knowledge.length > 0 || processes.length > 0) && (
-                     <span className="text-yellow-400 text-[10px] animate-pulse">✨</span>
-                   )}
-                </div>
-                <span className="text-[8px] font-black text-zinc-500 uppercase italic">
-                  Livraria Nobel • {knowledge.length + processes.length} Memórias Ativas
-                </span>
+                <h2 className="text-sm font-black uppercase text-zinc-100 tracking-widest italic">Suporte Técnico Nobelino</h2>
+                <span className="text-[8px] font-black text-zinc-500 uppercase italic">Livraria Nobel • IA de Balcão</span>
              </div>
           </div>
-          <div className="flex gap-1">
-            <button onClick={load} title="Sincronizar Cérebro" className="p-2 text-zinc-600 hover:text-yellow-400 transition-colors">🔄</button>
-            <button onClick={resetChat} title="Limpar Conversa" className="p-2 text-zinc-600 hover:text-red-400 transition-colors">🗑️</button>
-          </div>
+          <button onClick={resetChat} title="Nova Sessão" className="p-2 text-zinc-600 hover:text-white transition-colors">🗑️</button>
        </header>
 
        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-12">
          {messages.map((m, i) => (
            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] p-5 rounded-[24px] text-sm leading-relaxed ${
-                m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800 shadow-xl'
+                m.role === 'user' ? 'bg-zinc-100 text-black font-semibold' : 'bg-zinc-900 text-zinc-200 border border-zinc-800 shadow-2xl'
               }`}>
                 <div className="whitespace-pre-wrap">{m.content}</div>
                 {m.role === 'assistant' && i > 0 && (
-                  <button onClick={() => { navigator.clipboard.writeText(m.content); }} className="mt-4 text-[8px] font-black uppercase px-2 py-1 bg-zinc-800 text-zinc-500 rounded hover:text-white">📋 Copiar</button>
+                  <button onClick={() => { navigator.clipboard.writeText(m.content); }} className="mt-4 text-[8px] font-black uppercase px-2 py-1 bg-zinc-800 text-zinc-500 rounded hover:text-white">📋 Copiar Informações</button>
                 )}
               </div>
            </div>
          ))}
          {isLoading && (
            <div className="flex justify-start">
-              <div className="bg-zinc-900/50 text-zinc-600 px-4 py-2 rounded-full text-[8px] font-black uppercase italic animate-pulse">Lendo memórias do cérebro...</div>
+              <div className="bg-zinc-900/50 text-zinc-600 px-4 py-2 rounded-full text-[8px] font-black uppercase italic animate-pulse tracking-widest">Acessando acervo...</div>
            </div>
          )}
          <div ref={chatEndRef} />
        </div>
 
-       <div className="p-6 bg-zinc-950 border-t border-zinc-900 shadow-2xl">
+       <div className="p-6 bg-zinc-950 border-t border-zinc-900">
           <div className="max-w-4xl mx-auto flex gap-3">
              <button onClick={() => setIsVoiceOpen(true)} className="w-14 h-14 bg-zinc-900 rounded-2xl flex items-center justify-center text-xl border border-zinc-800 hover:border-yellow-400/50 transition-all shadow-lg active:scale-95">🎙️</button>
              <input 
               value={input} 
               onChange={e => setInput(e.target.value)} 
               onKeyDown={e => e.key === 'Enter' && handleSend()} 
-              placeholder="Diga quem é ou o que precisa..." 
+              placeholder="Pesquise títulos, temas ou identifique-se..." 
               className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-6 py-4 text-white focus:border-yellow-400 outline-none transition-all" 
               disabled={isLoading} 
              />
@@ -150,7 +136,7 @@ const ChatView: React.FC = () => {
               disabled={isLoading || !input.trim()} 
               className="bg-yellow-400 text-black px-8 rounded-2xl font-black uppercase text-xs hover:bg-yellow-300 transition-all active:scale-95 disabled:opacity-50"
              >
-               Enviar
+               Consultar
              </button>
           </div>
        </div>
