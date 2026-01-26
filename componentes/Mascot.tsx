@@ -54,9 +54,9 @@ const Mascot: React.FC<MascotProps> = ({ className, animated = false, talking = 
         {/* Bico */}
         <path className="beak-talk" d="M47 48L50 54L53 48H47Z" fill="#F97316" />
         
-        {/* Penas da cabeça */}
-        <path d="M30 25L42 30" stroke="#EAB308" strokeWidth="3" strokeLinecap="round" />
-        <path d="M70 25L58 30" stroke="#EAB308" strokeWidth="3" strokeLinecap="round" />
+        {/* Penas da cabeça - DIMINUÍDAS */}
+        <path d="M33 28L42 30" stroke="#EAB308" strokeWidth="3" strokeLinecap="round" />
+        <path d="M67 28L58 30" stroke="#EAB308" strokeWidth="3" strokeLinecap="round" />
       </svg>
     </div>
   );

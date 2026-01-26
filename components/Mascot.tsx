@@ -25,9 +25,9 @@ const Mascot: React.FC<MascotProps> = ({ className, animated = false, talking = 
         <path d="M42 88L40 95" stroke="#F97316" strokeWidth="4" strokeLinecap="round" />
         <path d="M58 88L60 95" stroke="#F97316" strokeWidth="4" strokeLinecap="round" />
         
-        {/* Penas da Cabeça (Coruja) */}
-        <path d="M22 28L10 5L35 18" fill="#FACC15" />
-        <path d="M78 28L90 5L65 18" fill="#FACC15" />
+        {/* Penas da Cabeça (Coruja) - DIMINUÍDAS */}
+        <path d="M22 28L18 18L35 22" fill="#FACC15" />
+        <path d="M78 28L82 18L65 22" fill="#FACC15" />
 
         {/* Cabeça e Corpo Amarelo Nobel */}
         <circle cx="50" cy="45" r="30" fill="#FACC15" />
