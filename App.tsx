@@ -1,19 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
-import Mascot from './componentes/Mascot';
-import ChatView from './componentes/ChatView';
-import InventoryManager from './componentes/InventoryManager';
-import KnowledgeManager from './componentes/KnowledgeManager';
-import MemoryManager from './componentes/MemoryManager';
-import EstimateManager from './componentes/EstimateManager';
+import Mascot from './components/Mascot';
+import ChatView from './components/ChatView';
+import InventoryManager from './components/InventoryManager';
+import KnowledgeManager from './components/KnowledgeManager';
+import MemoryManager from './components/MemoryManager';
+import EstimateManager from './components/EstimateManager';
+import Dashboard from './components/Dashboard';
 import { db } from './services/db';
 
-type ViewMode = 'chat' | 'inventory' | 'knowledge' | 'memory' | 'estimates';
+type ViewMode = 'chat' | 'inventory' | 'knowledge' | 'memory' | 'estimates' | 'dashboard';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewMode>('chat');
   const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const [hasNewKnowledge, setHasNewKnowledge] = useState(false);
   const [isApiActive, setIsApiActive] = useState(false);
 
   const checkApiKey = async () => {
@@ -29,15 +29,11 @@ const App: React.FC = () => {
     if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
       await window.aistudio.openSelectKey();
       setIsApiActive(true);
-      window.location.reload();
     }
   };
 
   useEffect(() => {
     checkApiKey();
-    const handleNewRule = () => setHasNewKnowledge(true);
-    window.addEventListener('nobel_rule_saved', handleNewRule);
-    return () => window.removeEventListener('nobel_rule_saved', handleNewRule);
   }, []);
 
   return (
@@ -50,17 +46,18 @@ const App: React.FC = () => {
           {isSidebarOpen && (
             <div className="animate-in fade-in duration-500">
               <h1 className="font-black text-lg tracking-tighter text-white">NOBEL<span className="text-yellow-400">.</span></h1>
-              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Assistente Digital</p>
+              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Vendedor Digital</p>
             </div>
           )}
         </div>
 
         <nav className="flex-1 px-3 space-y-2 mt-4 overflow-y-auto custom-scrollbar">
-          <NavItem icon="🦉" label="Vender" active={view === 'chat'} onClick={() => setView('chat')} collapsed={!isSidebarOpen} />
+          <NavItem icon="🦉" label="Balcão" active={view === 'chat'} onClick={() => setView('chat')} collapsed={!isSidebarOpen} />
+          <NavItem icon="📊" label="Painel" active={view === 'dashboard'} onClick={() => setView('dashboard')} collapsed={!isSidebarOpen} />
           <NavItem icon="📝" label="Orçamentos" active={view === 'estimates'} onClick={() => setView('estimates')} collapsed={!isSidebarOpen} />
           <NavItem icon="📚" label="Estoque" active={view === 'inventory'} onClick={() => setView('inventory')} collapsed={!isSidebarOpen} />
-          <NavItem icon="🧠" label="Treinar" active={view === 'knowledge'} onClick={() => setView('knowledge')} collapsed={!isSidebarOpen} hasNotification={hasNewKnowledge} />
-          <NavItem icon="💾" label="Sincronia" active={view === 'memory'} onClick={() => setView('memory')} collapsed={!isSidebarOpen} />
+          <NavItem icon="🧠" label="Treinar" active={view === 'knowledge'} onClick={() => setView('knowledge')} collapsed={!isSidebarOpen} />
+          <NavItem icon="💾" label="Backup" active={view === 'memory'} onClick={() => setView('memory')} collapsed={!isSidebarOpen} />
         </nav>
 
         <div className="p-4 border-t border-zinc-800 space-y-3">
@@ -80,6 +77,7 @@ const App: React.FC = () => {
 
       <main className="flex-1 relative overflow-hidden flex flex-col">
         {view === 'chat' && <ChatView />}
+        {view === 'dashboard' && <Dashboard />}
         {view === 'estimates' && <EstimateManager />}
         {view === 'inventory' && <InventoryManager />}
         {view === 'knowledge' && <KnowledgeManager />}
@@ -89,11 +87,10 @@ const App: React.FC = () => {
   );
 };
 
-const NavItem = ({ icon, label, active, onClick, collapsed, hasNotification }: any) => (
+const NavItem = ({ icon, label, active, onClick, collapsed }: any) => (
   <button onClick={onClick} className={`relative w-full flex items-center gap-4 px-4 py-3 rounded-2xl transition-all ${active ? 'bg-yellow-400 text-black shadow-lg shadow-yellow-400/20' : 'text-zinc-400 hover:bg-zinc-900'}`}>
     <span className="text-xl">{icon}</span>
     {!collapsed && <span className="font-bold text-sm whitespace-nowrap">{label}</span>}
-    {hasNotification && <span className="absolute top-2 right-2 w-2 h-2 bg-yellow-400 rounded-full animate-bounce"></span>}
   </button>
 );
 
