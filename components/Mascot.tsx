@@ -25,14 +25,18 @@ const Mascot: React.FC<MascotProps> = ({ className, animated = false, talking = 
         <path d="M42 85L40 92" stroke="#F97316" strokeWidth="3" strokeLinecap="round" />
         <path d="M58 85L60 92" stroke="#F97316" strokeWidth="3" strokeLinecap="round" />
         
+        {/* Peninhas da Cabeça (Orelhas de Coruja) */}
+        <path d="M28 24L18 8L36 18" fill="#FACC15" />
+        <path d="M72 24L82 8L64 18" fill="#FACC15" />
+
         {/* Corpo Amarelo Nobel */}
         <path d="M25 50C25 32 36 18 50 18C64 18 75 32 75 50V75C75 82 69 88 62 88H38C31 88 25 82 25 75V50Z" fill="#FACC15" />
         
         {/* Camisa Polo Preta Nobel */}
-        <path d="M25 62C25 58 30 52 40 50H60C70 52 75 58 75 62V75C75 82 69 88 62 88H38C31 88 25 82 25 75V62Z" fill="#18181b" />
+        <path d="M25 65C25 58 30 52 40 50H60C70 52 75 58 75 65V75C75 82 69 88 62 88H38C31 88 25 82 25 75V65Z" fill="#18181b" />
         
         {/* Detalhe Gola Nobel */}
-        <path d="M44 50L50 58L56 50" stroke="#FACC15" strokeWidth="2" strokeLinecap="round" />
+        <path d="M42 50L50 60L58 50" stroke="#FACC15" strokeWidth="2" strokeLinecap="round" fill="#18181b" />
         
         {/* Olhos */}
         <g className="eye-blink">
@@ -43,16 +47,16 @@ const Mascot: React.FC<MascotProps> = ({ className, animated = false, talking = 
             </>
           ) : (
             <>
-              <circle cx="38" cy="38" r="10" fill="white" />
-              <circle cx="62" cy="38" r="10" fill="white" />
-              <circle cx="38" cy="38" r="4" fill="#18181b" />
-              <circle cx="62" cy="38" r="4" fill="#18181b" />
+              <circle cx="38" cy="42" r="10" fill="white" />
+              <circle cx="62" cy="42" r="10" fill="white" />
+              <circle cx="38" cy="42" r="4" fill="#18181b" />
+              <circle cx="62" cy="42" r="4" fill="#18181b" />
             </>
           )}
         </g>
         
         {/* Bico */}
-        <path className="beak-talk" d="M47 48L50 54L53 48H47Z" fill="#F97316" />
+        <path className="beak-talk" d="M46 50L50 58L54 50H46Z" fill="#F97316" />
       </svg>
     </div>
   );
