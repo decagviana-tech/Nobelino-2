@@ -12,6 +12,26 @@ export interface Book {
   enriched?: boolean;
 }
 
+export interface EstimateItem {
+  bookId?: string;
+  title: string;
+  isbn?: string;
+  price: number;
+  quantity: number;
+  status: 'available' | 'order' | 'unavailable';
+  distributorSource?: string;
+}
+
+export interface Estimate {
+  id: string;
+  customerName: string;
+  sellerName: string;
+  items: EstimateItem[];
+  total: number;
+  createdAt: Date;
+  status: 'pending' | 'converted' | 'cancelled';
+}
+
 export interface SalesGoal {
   id: string;
   date: string;
@@ -45,6 +65,7 @@ export interface ChatMessage {
   isQuotaError?: boolean;
   estimatedCost?: number;
   isLocalResponse?: boolean;
+  detectedEstimate?: Partial<Estimate>;
 }
 
 export interface UsageMetrics {
