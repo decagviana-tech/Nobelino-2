@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ChatMessage, Book, KnowledgeEntry, PortableProcess } from '../types';
+import { ChatMessage, Book, KnowledgeEntry, PortableProcess, Estimate, EstimateItem } from '../types';
 import { INITIAL_INVENTORY } from '../data/mockInventory';
 import { processUserQuery } from '../services/geminiService';
 import { db } from '../services/db';
@@ -64,6 +64,20 @@ const ChatView: React.FC = () => {
         [], 
         processes
       );
+
+      if (result.detectedEstimate) {
+        const newEstimate: Estimate = {
+          id: `EST-${Date.now()}`,
+          customerName: result.detectedEstimate.customerName || "Cliente Nobel",
+          sellerName: "Consultor Nobelino",
+          items: (result.detectedEstimate.items || []) as EstimateItem[],
+          total: result.detectedEstimate.total || 0,
+          createdAt: new Date(),
+          status: 'pending'
+        };
+        await db.saveEstimate(newEstimate);
+        setCurrentMood('success');
+      }
       
       const assistantMsg: ChatMessage = { 
         role: 'assistant', 
@@ -74,7 +88,7 @@ const ChatView: React.FC = () => {
       const newHistory = [...messages, userMsg, assistantMsg];
       setMessages(newHistory);
       await db.save('nobel_chat_history', newHistory);
-      setCurrentMood('happy');
+      if (currentMood !== 'success') setCurrentMood('happy');
     } catch (e: any) {
       setCurrentMood('tired');
     } finally {
@@ -114,7 +128,7 @@ const ChatView: React.FC = () => {
          ))}
          {isLoading && (
            <div className="flex justify-start">
-              <div className="bg-zinc-900/50 text-zinc-600 px-4 py-2 rounded-full text-[8px] font-black uppercase italic animate-pulse tracking-widest">Acessando acervo...</div>
+              <div className="bg-zinc-900/50 text-zinc-600 px-4 py-2 rounded-full text-[8px] font-black uppercase italic animate-pulse tracking-widest">Processando Inteligência...</div>
            </div>
          )}
          <div ref={chatEndRef} />
@@ -127,7 +141,7 @@ const ChatView: React.FC = () => {
               value={input} 
               onChange={e => setInput(e.target.value)} 
               onKeyDown={e => e.key === 'Enter' && handleSend()} 
-              placeholder="Pesquise títulos, temas ou identifique-se..." 
+              placeholder="Pesquise títulos ou peça: 'Gera um orçamento para o João'" 
               className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-6 py-4 text-white focus:border-yellow-400 outline-none transition-all" 
               disabled={isLoading} 
              />

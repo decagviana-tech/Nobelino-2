@@ -1,5 +1,5 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import type { Book, ChatMessage, KnowledgeEntry, PortableProcess, Estimate } from "../types";
 
 export interface AIResult {
@@ -22,21 +22,14 @@ function slugify(text: string): string {
     .trim();
 }
 
-/**
- * Identifica se a mensagem é apenas um cumprimento inicial
- */
 function isGreeting(query: string): boolean {
   const greetings = ['ola', 'oi', 'bom dia', 'boa tarde', 'boa noite', 'opa', 'e ai', 'tudo bem'];
   const normalized = slugify(query);
   return greetings.some(g => normalized === g || normalized.startsWith(g + ' '));
 }
 
-/**
- * Motor de busca que prioriza a inteligência das sinopses.
- */
 function findRelevantBooks(query: string, inventory: Book[]): Book[] {
   if (isGreeting(query)) return [];
-
   const normalizedQuery = slugify(query);
   const isbnsInQuery = query.match(/\d{10,13}/g) || [];
   
@@ -54,11 +47,7 @@ function findRelevantBooks(query: string, inventory: Book[]): Book[] {
     const searchArea = slugify(`${book.title} ${book.author} ${book.genre || ''} ${book.description || ''}`);
     const matchCount = terms.filter(term => searchArea.includes(term)).length;
     return matchCount >= Math.ceil(terms.length * 0.4);
-  }).sort((a, b) => {
-    if (a.description && !b.description) return -1;
-    if (!a.description && b.description) return 1;
-    return 0;
-  }).slice(0, 15);
+  }).sort((a, b) => (a.description ? -1 : 1)).slice(0, 15);
 }
 
 export async function processUserQuery(
@@ -80,56 +69,78 @@ export async function processUserQuery(
 
   let stockContext = "";
   if (isQueryGreeting) {
-    stockContext = "O colaborador está apenas cumprimentando. Foque na saudação e na identificação.";
+    stockContext = "O colaborador está apenas cumprimentando.";
   } else if (relevantBooks.length > 0) {
-    stockContext = `ITENS DO ACERVO ENCONTRADOS PARA ESTA CONSULTA:\n${relevantBooks.map(b => `- ${b.title} | R$ ${b.price} | Estoque: ${b.stockCount} | ISBN: ${b.isbn}\n  SINOPSES: ${b.description || "Sem sinopse."}`).join('\n\n')}`;
-  } else {
-    stockContext = "Nenhum livro específico foi encontrado no banco de dados local para esta frase. Se o usuário estiver procurando um livro, informe educadamente que não localizou no estoque imediato e ofereça verificar o catálogo nacional.";
+    stockContext = `ITENS DO ACERVO ENCONTRADOS:\n${relevantBooks.map(b => `- ${b.title} | R$ ${b.price} | Estoque: ${b.stockCount} | ISBN: ${b.isbn}`).join('\n')}`;
   }
 
-  const systemInstruction = `Você é o NOBELINO, o Consultor Técnico de Suporte da Livraria Nobel.
-Sua aparência: Coruja amarela com camisa polo preta.
+  const systemInstruction = `Você é o NOBELINO, o Consultor Técnico da Livraria Nobel. 
 
-DIRETRIZ DE IDENTIFICAÇÃO (CRÍTICA):
-1. No início de uma nova conversa, sua prioridade é saber com quem fala: "Consultor Nobelino pronto. Com qual colaborador eu falo agora?".
-2. Se o usuário já se identificou antes, use o nome dele.
+INSTRUÇÃO PARA ORÇAMENTOS:
+Se o usuário pedir para "gerar orçamento", "fazer proposta" ou "salvar lista para cliente", você DEVE responder em formato JSON estrito para que o sistema capture os dados.
+O JSON deve ter este formato:
+{
+  "responseText": "Sua resposta amigável confirmando a criação do orçamento",
+  "estimate": {
+    "customerName": "Nome do cliente (se mencionado)",
+    "items": [
+      {"title": "Título", "price": 59.90, "isbn": "12345", "status": "available"}
+    ],
+    "total": 59.90
+  }
+}
 
-COMPORTAMENTO COM O ESTOQUE:
-- Você recebeu dados do estoque para ajudar o vendedor. Use-os com naturalidade.
-- NUNCA escreva mensagens técnicas entre parênteses como "*(Nota: ...)*". 
-- NUNCA diga "localmente" ou "banco de dados". Fale como se estivesse olhando a prateleira da loja.
-- Se não encontrar um livro, diga: "Não localizei esse título aqui no nosso sistema agora, mas posso verificar se conseguimos por encomenda!".
+Se NÃO for um pedido de orçamento, responda apenas com texto normal.
 
-CONTEXTO ATUAL:
+COMPORTAMENTO:
+- Saudações: Pergunte o nome do colaborador.
+- Sem Notas Técnicas: NUNCA use "*(Nota: ...)*".
+- Estoque: Fale com naturalidade sobre disponibilidade.
+
+CONTEXTO DO ACERVO:
 ${stockContext}
 
-REGRAS E PROCESSOS DA LOJA:
+REGRAS DA LOJA:
 ${rulesText}
-${processesText}
-
-Tom de voz: Expert, prestativo e focado em vendas. Use 🦉.`;
+${processesText}`;
 
   try {
     const response = await ai.models.generateContent({
       model,
       contents: [
-        ...history.slice(-10).map(m => ({ 
+        ...history.slice(-6).map(m => ({ 
           role: m.role === 'user' ? 'user' : 'model' as any, 
           parts: [{ text: m.content }] 
         })),
         { role: 'user', parts: [{ text: query }] }
       ],
-      config: { systemInstruction, temperature: 0.3 }
+      config: { 
+        systemInstruction, 
+        temperature: 0.2,
+        responseMimeType: query.toLowerCase().includes('orçamento') || query.toLowerCase().includes('proposta') ? "application/json" : "text/plain"
+      }
     });
 
+    const text = response.text;
+    
+    if (text.trim().startsWith('{')) {
+      const data = JSON.parse(text);
+      return {
+        responseText: data.responseText || "🦉 Orçamento gerado com sucesso!",
+        recommendedBooks: relevantBooks,
+        isLocalResponse: false,
+        detectedEstimate: data.estimate
+      };
+    }
+
     return {
-      responseText: response.text || "🦉 Como posso ajudar no balcão hoje?",
+      responseText: text || "🦉 Como posso ajudar no balcão hoje?",
       recommendedBooks: relevantBooks,
       isLocalResponse: false
     };
   } catch (error) {
     return {
-      responseText: "🦉 Tive um pequeno problema de conexão. Pode repetir?",
+      responseText: "🦉 Estou com dificuldades para processar isso agora. Pode tentar de novo?",
       recommendedBooks: [],
       isLocalResponse: true
     };
