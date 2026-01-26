@@ -65,16 +65,33 @@ const ChatView: React.FC = () => {
         processes
       );
 
+      // --- CONFERÊNCIA DE SEGURANÇA NOBEL ---
       if (result.detectedEstimate) {
+        // Corrigimos os itens com os valores REAIS do inventário
+        const correctedItems = (result.detectedEstimate.items || []).map(item => {
+          const realBook = inventory.find(b => 
+            (item.isbn && b.isbn === item.isbn) || 
+            (b.title.toLowerCase() === item.title?.toLowerCase())
+          );
+          
+          return {
+            ...item,
+            price: realBook ? Number(realBook.price) : Number(item.price) // Sobrescreve com o preço real
+          };
+        });
+
+        const correctedTotal = correctedItems.reduce((acc, curr) => acc + curr.price, 0);
+
         const newEstimate: Estimate = {
           id: `EST-${Date.now()}`,
           customerName: result.detectedEstimate.customerName || "Cliente Nobel",
           sellerName: "Consultor Nobelino",
-          items: (result.detectedEstimate.items || []) as EstimateItem[],
-          total: result.detectedEstimate.total || 0,
+          items: correctedItems as EstimateItem[],
+          total: correctedTotal,
           createdAt: new Date(),
           status: 'pending'
         };
+        
         await db.saveEstimate(newEstimate);
         setCurrentMood('success');
       }
@@ -128,7 +145,7 @@ const ChatView: React.FC = () => {
          ))}
          {isLoading && (
            <div className="flex justify-start">
-              <div className="bg-zinc-900/50 text-zinc-600 px-4 py-2 rounded-full text-[8px] font-black uppercase italic animate-pulse tracking-widest">Processando Inteligência...</div>
+              <div className="bg-zinc-900/50 text-zinc-600 px-4 py-2 rounded-full text-[8px] font-black uppercase animate-pulse tracking-widest">Conferindo Estoque...</div>
            </div>
          )}
          <div ref={chatEndRef} />
@@ -141,7 +158,7 @@ const ChatView: React.FC = () => {
               value={input} 
               onChange={e => setInput(e.target.value)} 
               onKeyDown={e => e.key === 'Enter' && handleSend()} 
-              placeholder="Pesquise títulos ou peça: 'Gera um orçamento para o João'" 
+              placeholder="Ex: 'Gera orçamento de Coraline'" 
               className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-6 py-4 text-white focus:border-yellow-400 outline-none transition-all" 
               disabled={isLoading} 
              />

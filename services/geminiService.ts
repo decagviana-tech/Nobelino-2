@@ -71,31 +71,28 @@ export async function processUserQuery(
   if (isQueryGreeting) {
     stockContext = "O colaborador está apenas cumprimentando.";
   } else if (relevantBooks.length > 0) {
-    stockContext = `ITENS DO ACERVO ENCONTRADOS:\n${relevantBooks.map(b => `- ${b.title} | R$ ${b.price} | Estoque: ${b.stockCount} | ISBN: ${b.isbn}`).join('\n')}`;
+    stockContext = `DADOS REAIS DO ESTOQUE (USE EXATAMENTE ESTES PREÇOS):\n${relevantBooks.map(b => `- LIVRO: ${b.title} | PREÇO: R$ ${b.price} | ISBN: ${b.isbn}`).join('\n')}`;
   }
 
-  const systemInstruction = `Você é o NOBELINO, o Consultor Técnico da Livraria Nobel. 
+  const systemInstruction = `Você é o NOBELINO, o Consultor Técnico da Livraria Nobel.
 
-INSTRUÇÃO PARA ORÇAMENTOS:
-Se o usuário pedir para "gerar orçamento", "fazer proposta" ou "salvar lista para cliente", você DEVE responder em formato JSON estrito para que o sistema capture os dados.
-O JSON deve ter este formato:
+REGRAS DE OURO PARA PREÇOS:
+1. Você JAMAIS deve inventar, arredondar ou estimar um preço.
+2. Use EXATAMENTE o valor que aparece em "PREÇO" no contexto acima. 
+3. Se o contexto diz "R$ 69.9", o orçamento deve ser "69.9", nunca "68.15" ou qualquer outro valor.
+
+INSTRUÇÃO PARA ORÇAMENTOS (JSON):
+Se o usuário pedir orçamento, retorne EXATAMENTE este formato:
 {
-  "responseText": "Sua resposta amigável confirmando a criação do orçamento",
+  "responseText": "Confirmação amigável",
   "estimate": {
-    "customerName": "Nome do cliente (se mencionado)",
+    "customerName": "Nome do cliente",
     "items": [
-      {"title": "Título", "price": 59.90, "isbn": "12345", "status": "available"}
+      {"title": "Título exato", "price": 69.90, "isbn": "ISBN exato", "status": "available"}
     ],
-    "total": 59.90
+    "total": 69.90
   }
 }
-
-Se NÃO for um pedido de orçamento, responda apenas com texto normal.
-
-COMPORTAMENTO:
-- Saudações: Pergunte o nome do colaborador.
-- Sem Notas Técnicas: NUNCA use "*(Nota: ...)*".
-- Estoque: Fale com naturalidade sobre disponibilidade.
 
 CONTEXTO DO ACERVO:
 ${stockContext}
@@ -116,7 +113,7 @@ ${processesText}`;
       ],
       config: { 
         systemInstruction, 
-        temperature: 0.2,
+        temperature: 0.1, // Menor temperatura = maior precisão
         responseMimeType: query.toLowerCase().includes('orçamento') || query.toLowerCase().includes('proposta') ? "application/json" : "text/plain"
       }
     });
@@ -126,7 +123,7 @@ ${processesText}`;
     if (text.trim().startsWith('{')) {
       const data = JSON.parse(text);
       return {
-        responseText: data.responseText || "🦉 Orçamento gerado com sucesso!",
+        responseText: data.responseText || "🦉 Orçamento gerado!",
         recommendedBooks: relevantBooks,
         isLocalResponse: false,
         detectedEstimate: data.estimate
@@ -134,13 +131,13 @@ ${processesText}`;
     }
 
     return {
-      responseText: text || "🦉 Como posso ajudar no balcão hoje?",
+      responseText: text || "🦉 Em que posso ajudar?",
       recommendedBooks: relevantBooks,
       isLocalResponse: false
     };
   } catch (error) {
     return {
-      responseText: "🦉 Estou com dificuldades para processar isso agora. Pode tentar de novo?",
+      responseText: "🦉 Tive um erro técnico. Pode repetir?",
       recommendedBooks: [],
       isLocalResponse: true
     };
