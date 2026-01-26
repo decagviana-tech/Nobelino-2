@@ -39,9 +39,10 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
 
   const decodeAudioData = async (data: Uint8Array, ctx: AudioContext, sampleRate: number) => {
     const dataInt16 = new Int16Array(data.buffer);
-    const buffer = ctx.createBuffer(1, dataInt16.length, sampleRate);
+    const frameCount = dataInt16.length;
+    const buffer = ctx.createBuffer(1, frameCount, sampleRate);
     const channelData = buffer.getChannelData(0);
-    for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
+    for (let i = 0; i < frameCount; i++) channelData[i] = dataInt16[i] / 32768.0;
     return buffer;
   };
 
@@ -66,7 +67,8 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      // CRITICAL: Always initialize GoogleGenAI with process.env.API_KEY directly
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
@@ -127,19 +129,31 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
           onclose: () => {
             if (!isClosingRef.current) stopSession();
           },
-          onerror: (e) => {
+          onerror: (e: any) => {
             console.error(e);
+            // Handle missing API key or invalid key state
+            if (e?.message?.includes("Requested entity was not found.")) {
+              // @ts-ignore
+              if (window.aistudio && window.aistudio.openSelectKey) {
+                window.aistudio.openSelectKey();
+              }
+            }
             setError("Falha na conexão de voz.");
           },
         },
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          systemInstruction: `VOCÊ É O NOBELINO, assistente de voz da Livraria Nobel. 
-          Use as informações de estoque e regras da loja para ajudar.
-          ESTOQUE: ${inventory.slice(0, 10).map(b => b.title).join(', ')}...
-          REGRAS: ${knowledge.map(k => k.topic).join(', ')}
-          Seja breve e motivador.`
+          systemInstruction: `VOCÊ É O NOBELINO, assistente da Livraria Nobel.
+          DIRETRIZ CRÍTICA: Sua primeira frase DEVE ser: "Olá! Nobelino no balcão. Com qual colaborador eu falo agora?".
+          
+          Após o usuário dizer o nome, verifique se ele está na lista de funcionários cadastrada nas REGRAS.
+          Se estiver, use o nome dele nas respostas. Se não estiver, trate-o como "colaborador".
+          
+          REGRAS/EQUIPE: ${knowledge.map(k => `${k.topic}: ${k.content}`).join(' | ')}
+          ESTOQUE: ${inventory.slice(0, 5).map(b => b.title).join(', ')}
+          
+          Seja breve, profissional e focado em vendas.`
         }
       });
 
@@ -187,7 +201,7 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
       <div className="text-center max-w-2xl space-y-6">
         <div className="space-y-2">
            <h2 className={`font-black text-[10px] uppercase tracking-[0.6em] transition-colors ${error ? 'text-red-500' : isSpeaking ? 'text-yellow-400' : 'text-zinc-500'}`}>
-            {error ? 'ERRO DE CONEXÃO' : isSpeaking ? 'NOBELINO RESPONDENDO' : 'PODE FALAR, ESTOU OUVINDO'}
+            {error ? 'ERRO DE CONEXÃO' : isSpeaking ? 'NOBELINO RESPONDENDO' : 'IDENTIFIQUE-SE PARA COMEÇAR'}
           </h2>
           <div className="h-1 w-24 bg-zinc-900 mx-auto rounded-full overflow-hidden">
              {(isListening || isSpeaking) && <div className="h-full bg-yellow-400 animate-pulse w-full"></div>}
@@ -196,7 +210,7 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
 
         <div className="bg-zinc-900/40 p-8 rounded-[32px] border border-zinc-800 min-h-[120px] flex items-center justify-center">
            <p className="text-zinc-100 text-xl font-medium leading-relaxed italic opacity-90">
-            {transcript || (error ? "Houve um problema com o microfone." : "Diga algo como 'Como estão as vendas?'...") }
+            {transcript || (error ? "Houve um problema com o microfone." : "Aguardando identificação...") }
           </p>
         </div>
 
