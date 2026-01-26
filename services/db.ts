@@ -46,7 +46,6 @@ export const db = {
     });
   },
 
-  // Helper para normalizar ISBN (remove tudo que não é número)
   normalizeISBN(val: any): string {
     if (!val) return "";
     return String(val).replace(/\D/g, "");
@@ -79,6 +78,18 @@ export const db = {
     return newEntry;
   },
 
+  async saveEstimate(estimate: any) {
+    const current = await this.get('nobel_estimates') || [];
+    const updated = [estimate, ...current];
+    await this.save('nobel_estimates', updated);
+  },
+
+  async deleteEstimate(id: string) {
+    const current = await this.get('nobel_estimates') || [];
+    const updated = current.filter((e: any) => e.id !== id);
+    await this.save('nobel_estimates', updated);
+  },
+
   parseValue(val: any): number | null {
     if (val === undefined || val === null || val === "") return null;
     if (typeof val === 'number') return val;
@@ -92,7 +103,7 @@ export const db = {
     for (const pattern of patterns) {
       if (obj[pattern] !== undefined) return obj[pattern];
       const foundKey = keys.find(k => k.toLowerCase().replace(/\s/g, '').includes(pattern.toLowerCase().replace(/\s/g, '')));
-      if (foundKey) return obj[foundKey];
+      if (foundKey) return foundKey;
     }
     return undefined;
   },
@@ -101,9 +112,9 @@ export const db = {
     const inventory = await this.get('nobel_inventory') || [];
     const updatedInventory = [...inventory];
     let added = 0;
-    let updated = 0;
+    let updatedCount = 0;
 
-    const ISBN_ALIASES = ['ISBN', 'EAN', 'Codigo', 'CÓDIGO', 'Barras', 'Referencia', 'id'];
+    const ISBN_ALIASES = ['ISBN', 'EAN', 'SBN', 'Codigo', 'CÓDIGO', 'Barras', 'Referencia', 'id'];
     const PRICE_ALIASES = ['Preço', 'Preco', 'Valor', 'Venda', 'Vlr', 'Preço Venda', 'Unitário', 'Price'];
     const STOCK_ALIASES = ['Estoque', 'Quantidade', 'Qtd', 'Saldo', 'UN', 'Unidades', 'Disponível', 'Stock'];
     const TITLE_ALIASES = ['Título', 'Titulo', 'Nome', 'Descrição', 'Descricao', 'Produto', 'Title'];
@@ -112,38 +123,42 @@ export const db = {
     const SYNOPSIS_ALIASES = ['Sinopse', 'Descrição Longa', 'Resumo', 'Description', 'Synopsis'];
 
     incomingBooks.forEach(incoming => {
-      const isbnRaw = this.getValueByPattern(incoming, ISBN_ALIASES);
+      const isbnKey = this.getValueByPattern(incoming, ISBN_ALIASES);
+      const isbnRaw = isbnKey ? incoming[isbnKey] : undefined;
       const isbnClean = this.normalizeISBN(isbnRaw);
       
       if (!isbnClean || isbnClean === "0") return;
 
-      const title = this.getValueByPattern(incoming, TITLE_ALIASES);
-      const author = this.getValueByPattern(incoming, AUTHOR_ALIASES);
-      const genre = this.getValueByPattern(incoming, GENRE_ALIASES);
-      const description = this.getValueByPattern(incoming, SYNOPSIS_ALIASES);
+      const titleKey = this.getValueByPattern(incoming, TITLE_ALIASES);
+      const title = titleKey ? incoming[titleKey] : undefined;
       
-      const priceVal = this.parseValue(this.getValueByPattern(incoming, PRICE_ALIASES));
-      const stockVal = this.parseValue(this.getValueByPattern(incoming, STOCK_ALIASES));
+      const authorKey = this.getValueByPattern(incoming, AUTHOR_ALIASES);
+      const author = authorKey ? incoming[authorKey] : undefined;
+      
+      const genreKey = this.getValueByPattern(incoming, GENRE_ALIASES);
+      const genre = genreKey ? incoming[genreKey] : undefined;
+      
+      const descKey = this.getValueByPattern(incoming, SYNOPSIS_ALIASES);
+      const description = descKey ? incoming[descKey] : undefined;
+      
+      const priceVal = this.parseValue(incoming[this.getValueByPattern(incoming, PRICE_ALIASES) || '']);
+      const stockVal = this.parseValue(incoming[this.getValueByPattern(incoming, STOCK_ALIASES) || '']);
 
-      // Busca usando o ISBN normalizado (apenas números)
       const idx = updatedInventory.findIndex(b => this.normalizeISBN(b.isbn) === isbnClean);
       
       if (idx !== -1) {
         const existing = updatedInventory[idx];
-        
         updatedInventory[idx] = { 
           ...existing, 
-          title: title ? String(title).trim() : existing.title,
-          author: author ? String(author).trim() : existing.author,
-          description: description ? String(description).trim() : existing.description,
+          title: (existing.title === "Título não informado" && title) ? String(title).trim() : existing.title,
+          author: (author && (!existing.author || existing.author === "Desconhecido")) ? String(author).trim() : existing.author,
+          description: (description && description.length > (existing.description?.length || 0)) ? String(description).trim() : existing.description,
           genre: genre ? String(genre).trim() : existing.genre,
-          // SUBSTITUI (Overwrite) o valor para não somar duplicado
           price: (priceVal !== null) ? priceVal : existing.price,
           stockCount: (stockVal !== null) ? Math.floor(stockVal) : existing.stockCount,
-          isbn: isbnClean, // Padroniza o ISBN no banco para apenas números
           enriched: !!(description || existing.description)
         };
-        updated++;
+        updatedCount++;
       } else {
         if (title || isbnClean) {
           updatedInventory.push({
@@ -163,39 +178,11 @@ export const db = {
     });
 
     await this.save('nobel_inventory', updatedInventory);
-    return { added, updated };
+    return { added, updated: updatedCount };
   },
 
   async clearInventory() {
     await this.save('nobel_inventory', []);
-  },
-
-  async updateDailySales(amount: number) {
-    const today = new Date().toISOString().split('T')[0];
-    const goals = await this.get('nobel_sales_goals') || [];
-    let todayGoal = goals.find((g: any) => g.date === today);
-    if (!todayGoal) {
-      todayGoal = { id: today, date: today, minGoal: 0, superGoal: 0, actualSales: 0 };
-      goals.push(todayGoal);
-    }
-    todayGoal.actualSales += amount;
-    await this.save('nobel_sales_goals', goals);
-    return todayGoal;
-  },
-
-  async setDailyGoal(minGoal: number, superGoal: number) {
-    const today = new Date().toISOString().split('T')[0];
-    const goals = await this.get('nobel_sales_goals') || [];
-    let todayGoal = goals.find((g: any) => g.date === today);
-    if (!todayGoal) {
-      todayGoal = { id: today, date: today, minGoal, superGoal, actualSales: 0 };
-      goals.push(todayGoal);
-    } else {
-      todayGoal.minGoal = minGoal;
-      todayGoal.superGoal = superGoal;
-    }
-    await this.save('nobel_sales_goals', goals);
-    return todayGoal;
   },
 
   async exportBrain() {
@@ -229,5 +216,42 @@ export const db = {
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
+  },
+
+  async setDailyGoal(minGoal: number, superGoal: number) {
+    const today = new Date().toISOString().split('T')[0];
+    const goals = await this.get('nobel_sales_goals') || [];
+    const idx = goals.findIndex((g: any) => g.date === today);
+    const newGoal = {
+      id: idx !== -1 ? goals[idx].id : Date.now().toString(),
+      date: today,
+      minGoal,
+      superGoal,
+      actualSales: idx !== -1 ? goals[idx].actualSales : 0
+    };
+    if (idx !== -1) {
+      goals[idx] = newGoal;
+    } else {
+      goals.push(newGoal);
+    }
+    await this.save('nobel_sales_goals', goals);
+  },
+
+  async updateDailySales(amount: number) {
+    const today = new Date().toISOString().split('T')[0];
+    const goals = await this.get('nobel_sales_goals') || [];
+    const idx = goals.findIndex((g: any) => g.date === today);
+    if (idx !== -1) {
+      goals[idx].actualSales += amount;
+    } else {
+      goals.push({
+        id: Date.now().toString(),
+        date: today,
+        minGoal: 0,
+        superGoal: 0,
+        actualSales: amount
+      });
+    }
+    await this.save('nobel_sales_goals', goals);
   }
 };
