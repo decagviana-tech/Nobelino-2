@@ -65,6 +65,20 @@ export const db = {
     return newEntry;
   },
 
+  async updateKnowledge(id: string, topic: string, content: string) {
+    const current = await this.get('nobel_knowledge_base') || [];
+    const updated = current.map((e: any) => 
+      e.id === id ? { ...e, topic, content } : e
+    );
+    await this.save('nobel_knowledge_base', updated);
+  },
+
+  async deleteKnowledge(id: string) {
+    const current = await this.get('nobel_knowledge_base') || [];
+    const updated = current.filter((e: any) => e.id !== id);
+    await this.save('nobel_knowledge_base', updated);
+  },
+
   async addProcess(name: string, steps: string[]) {
     const current = await this.get('nobel_processes') || [];
     const newEntry = {
@@ -76,6 +90,12 @@ export const db = {
     const updated = [newEntry, ...current];
     await this.save('nobel_processes', updated);
     return newEntry;
+  },
+
+  async deleteProcess(id: string) {
+    const current = await this.get('nobel_processes') || [];
+    const updated = current.filter((p: any) => p.id !== id);
+    await this.save('nobel_processes', updated);
   },
 
   async saveEstimate(estimate: any) {
