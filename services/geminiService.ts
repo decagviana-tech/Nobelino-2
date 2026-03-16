@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { Book, ChatMessage, KnowledgeEntry, PortableProcess, Estimate } from "../types";
 
 export interface AIResult {
@@ -35,7 +35,6 @@ function findRelevantBooks(query: string, inventory: Book[]): Book[] {
   if (isGreeting(query)) return [];
   
   const rawTerms = slugify(query).split(/\s+/).filter(t => t.length > 2);
-  // Filtra palavras comuns para focar no assunto real (ex: 'meditacao' em vez de 'temos livro sobre')
   const searchTerms = rawTerms.filter(t => !STOP_WORDS.has(t));
   
   const isbnsInQuery = query.match(/\d{10,13}/g) || [];
@@ -55,16 +54,16 @@ function findRelevantBooks(query: string, inventory: Book[]): Book[] {
     
     let score = 0;
     searchTerms.forEach(term => {
-      if (titleArea.includes(term)) score += 10;      // Título tem peso máximo
-      if (authorArea.includes(term)) score += 5;     // Autor tem peso médio
-      if (synopsisArea.includes(term)) score += 8;   // SINOPSE tem peso alto (aqui está a mágica!)
+      if (titleArea.includes(term)) score += 10;
+      if (authorArea.includes(term)) score += 5;
+      if (synopsisArea.includes(term)) score += 8;
     });
     
     return { book, score };
   })
   .filter(item => item.score > 0)
   .sort((a, b) => b.score - a.score)
-  .slice(0, 12) // Limitamos a 12 para economizar tokens/dinheiro na API
+  .slice(0, 12)
   .map(item => item.book);
 }
 
@@ -92,15 +91,17 @@ export async function processUserQuery(
   knowledge: KnowledgeEntry[] = [],
   processes: PortableProcess[] = []
 ): Promise<AIResult> {
-  // Busca a chave em múltiplas fontes (env, window, ou fallback)
   const apiKey = (process.env.API_KEY || (window as any).API_KEY || "");
   
   if (!apiKey) {
-    console.warn("API_KEY não encontrada.");
+    return {
+      responseText: "🦉 Ups! Parece que falta conectar sua chave de API no botão ali do lado. Sem ela, meu cérebro coruja não liga!",
+      recommendedBooks: [],
+      isLocalResponse: true
+    };
   }
 
-  const ai = new GoogleGenAI({ apiKey });
-  const model = "gemini-1.5-flash";
+  const genAI = new GoogleGenerativeAI(apiKey);
 
   const relevantBooks = findRelevantBooks(query, inventory);
   const relevantKnowledge = findRelevantKnowledge(query, knowledge);
@@ -133,30 +134,35 @@ ${rulesText}
 ${processesText}
 ${stockContext}`;
 
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-1.5-flash",
+    generationConfig: {
+        temperature: 0.1,
+        responseMimeType: isBudgetRequest ? "application/json" : "text/plain",
+    }
+  }, { apiVersion: 'v1beta' }); // Explicitamente v1beta para garantir compatibilidade
+
   try {
-    const chatHistory = history.slice(-4).map(m => ({
-      role: m.role === 'user' ? 'user' : 'model' as any,
+    const chatHistory = history.slice(-6).map(m => ({
+      role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.content || "" }]
     }));
 
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash-latest", 
-      contents: [...chatHistory, { role: 'user', parts: [{ text: query }] }],
-      config: { 
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        temperature: 0.1, 
-        tools: shouldSearchWeb ? [{ googleSearch: {} }] : [],
-        responseMimeType: isBudgetRequest ? "application/json" : "text/plain"
-      }
+    // Injetamos a system instruction no início da conversa se o SDK não suportar nativamente no getGenerativeModel
+    const contents = [
+        { role: 'user', parts: [{ text: `INSTRUÇÕES DE SISTEMA: ${systemInstruction}` }] },
+        { role: 'model', parts: [{ text: 'Entendido. Sou o Nobelino e seguirei essas instruções.' }] },
+        ...chatHistory,
+        { role: 'user', parts: [{ text: query }] }
+    ];
+
+    const result = await model.generateContent({
+        contents,
+        tools: shouldSearchWeb ? [{ googleSearchRetrieval: {} } as any] : []
     });
 
-    // Acesso seguro ao texto (pode ser property ou function em algumas versões/SDKs)
-    let text = "";
-    try {
-      text = typeof (response as any).text === 'function' ? (response as any).text() : response.text;
-    } catch (e) {
-      text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    }
+    const response = await result.response;
+    const text = response.text();
 
     if (!text) throw new Error("Resposta AI vazia");
 
@@ -177,7 +183,6 @@ ${stockContext}`;
           groundingUrls: urls
         };
       } catch (jsonErr) {
-        // Fallback se o JSON falhar
         return { responseText: text, recommendedBooks: relevantBooks, isLocalResponse: false, groundingUrls: urls };
       }
     }
@@ -191,7 +196,7 @@ ${stockContext}`;
   } catch (error: any) {
     console.error("Erro AI:", error);
     return {
-      responseText: `🦉 Tive um pequeno soluço digital: ${error.message || 'Erro desconhecido'}. Verifique se a chave API está conectada.`,
+      responseText: `🦉 Tive um pequeno soluço digital: ${error.message || 'Erro desconhecido'}. Verifique se a API está ATIVADA no Google Cloud e se a chave está correta.`,
       recommendedBooks: [],
       isLocalResponse: true
     };
