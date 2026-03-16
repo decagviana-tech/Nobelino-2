@@ -140,10 +140,10 @@ ${stockContext}`;
     }));
 
     const response = await ai.models.generateContent({
-      model,
+      model: "gemini-1.5-flash", 
       contents: [...chatHistory, { role: 'user', parts: [{ text: query }] }],
       config: { 
-        systemInstruction, 
+        systemInstruction: { parts: [{ text: systemInstruction }] },
         temperature: 0.1, 
         tools: shouldSearchWeb ? [{ googleSearch: {} }] : [],
         responseMimeType: isBudgetRequest ? "application/json" : "text/plain"
