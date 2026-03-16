@@ -68,6 +68,23 @@ function findRelevantBooks(query: string, inventory: Book[]): Book[] {
   .map(item => item.book);
 }
 
+function findRelevantKnowledge(query: string, knowledge: KnowledgeEntry[], limit = 3): KnowledgeEntry[] {
+  const terms = slugify(query).split(/\s+/).filter(t => t.length > 3 && !STOP_WORDS.has(t));
+  if (terms.length === 0) return [];
+
+  return knowledge
+    .map(k => {
+      const area = slugify(k.topic + " " + k.content);
+      let score = 0;
+      terms.forEach(t => { if (area.includes(t)) score += 1; });
+      return { k, score };
+    })
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(item => item.k);
+}
+
 export async function processUserQuery(
   query: string,
   inventory: Book[],
@@ -76,49 +93,48 @@ export async function processUserQuery(
   processes: PortableProcess[] = []
 ): Promise<AIResult> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const model = "gemini-3-flash-preview"; 
+  const model = "gemini-1.5-flash"; // Modelo mais rápido e barato
 
   const relevantBooks = findRelevantBooks(query, inventory);
+  const relevantKnowledge = findRelevantKnowledge(query, knowledge);
   const isQueryGreeting = isGreeting(query);
+  const isBudgetRequest = query.toLowerCase().includes('orçamento') || query.toLowerCase().includes('proposta');
   
-  const rulesText = knowledge.map(k => `[REGRA]: ${k.content}`).join('\n');
-  const processesText = processes.map(p => `[PROCESSO]: ${p.name}`).join('\n');
+  // Só ativa o Google Search se não tivermos nada no estoque E for uma dúvida de assunto
+  const shouldSearchWeb = !isQueryGreeting && relevantBooks.length === 0 && query.length > 15;
+
+  const rulesText = relevantKnowledge.map(k => `[INSTRUÇÃO LOJA]: ${k.content}`).join('\n');
+  const processesText = processes.length > 0 && !isQueryGreeting ? `[PROCESSO SUGERIDO]: ${processes[0].name} (${processes[0].steps.join(' -> ')})` : '';
 
   let stockContext = "";
   if (isQueryGreeting) {
-    stockContext = "O vendedor está apenas iniciando o turno ou cumprimentando.";
+    stockContext = "O vendedor está iniciando o atendimento.";
   } else if (relevantBooks.length > 0) {
     stockContext = `ESTOQUE LOCAL (PRIORIDADE):
-${relevantBooks.map(b => `- ${b.title} | R$ ${b.price} | ISBN: ${b.isbn} | SINOPSE: ${b.description?.slice(0, 150)}...`).join('\n')}`;
-  } else {
-    stockContext = "AVISO: Não encontrei nada EXATO no estoque. Use sua base de conhecimento para sugerir autores, mas avise que não temos no momento.";
+${relevantBooks.slice(0, 5).map(b => `- ${b.title} | R$ ${b.price} | SINOPSE: ${b.description?.slice(0, 100)}...`).join('\n')}`;
+  } else if (!shouldSearchWeb) {
+    stockContext = "Não encontramos livros com esse termo exato no estoque local.";
   }
 
-  const systemInstruction = `Você é o NOBELINO, o Corujinha Consultor. 
+  const systemInstruction = `Você é o NOBELINO, o Corujinha Consultor da Nobel Petrópolis. 
 
-MISSÃO:
-Encontrar livros pelo ASSUNTO. Se o cliente quer "meditação" e o título não diz, você DEVE ler as SINOPSES no contexto abaixo para encontrar.
+MISSÃO: Ajudar o vendedor a encontrar livros pelo ASSUNTO nas SINOPSES.
 
-REGRAS DE OURO:
-1. Se o assunto (ex: elementais) estiver na SINOPSE de um livro do estoque, INDIQUE-O imediatamente.
-2. Seja um vendedor proativo: "No título não diz, mas a sinopse deste livro fala exatamente sobre o que você procura".
-3. Se não encontrar no estoque, use o Google Search para descobrir qual livro trata desse assunto e diga: "O livro ideal seria X, não temos hoje, mas posso encomendar".
-4. Mantenha as respostas curtas (máximo 3 parágrafos) para economizar processamento.
+REGRAS:
+1. Priorize o ESTOQUE LOCAL. Se encontrar algo na SINOPSE que bate com o assunto, indique com entusiasmo.
+2. Se não houver estoque local relevante, use sua inteligência geral para sugerir autores/títulos e mencione que podemos encomendar.
+3. Mantenha respostas curtas e objetivas (máx 3 parágrafos).
+4. Se o cliente for comprar, lembre o vendedor de lançar a venda no Painel para atualizar o estoque.
 
-CONTEXTO DE ESTOQUE ATUAL:
-${stockContext}
-
-OUTRAS REGRAS:
 ${rulesText}
-${processesText}`;
+${processesText}
+${stockContext}`;
 
   try {
-    const isBudgetRequest = query.toLowerCase().includes('orçamento') || query.toLowerCase().includes('proposta');
-    
     const response = await ai.models.generateContent({
       model,
       contents: [
-        ...history.slice(-6).map(m => ({ 
+        ...history.slice(-4).map(m => ({ // Reduzi histórico para economizar tokens
           role: m.role === 'user' ? 'user' : 'model' as any, 
           parts: [{ text: m.content }] 
         })),
@@ -126,8 +142,8 @@ ${processesText}`;
       ],
       config: { 
         systemInstruction, 
-        temperature: 0.1, // Menor temperatura = mais foco no estoque e menos "alucinação"
-        tools: [{ googleSearch: {} }],
+        temperature: 0.1, 
+        tools: shouldSearchWeb ? [{ googleSearch: {} }] : [],
         responseMimeType: isBudgetRequest ? "application/json" : "text/plain"
       }
     });

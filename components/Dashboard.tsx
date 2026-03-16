@@ -2,18 +2,20 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { SalesGoal, Book } from '../types';
+import * as XLSX from 'xlsx';
 
 const Dashboard: React.FC = () => {
   const [goals, setGoals] = useState<SalesGoal[]>([]);
   const [inventory, setInventory] = useState<Book[]>([]);
   const [isEditingGoal, setIsEditingGoal] = useState(false);
   const [isQuickSelling, setIsQuickSelling] = useState(false);
+  const [isUploadingSales, setIsUploadingSales] = useState(false);
   const [quickSaleValue, setQuickSaleValue] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
   
   const [newMin, setNewMin] = useState(0);
   const [newSuper, setNewSuper] = useState(0);
-  
+
   const load = async () => {
     const g = await db.get('nobel_sales_goals') || [];
     const inv = await db.get('nobel_inventory') || [];
@@ -40,6 +42,33 @@ const Dashboard: React.FC = () => {
     load();
   };
 
+  const handleSalesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingSales(true);
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const data = evt.target?.result;
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet);
+        
+        const amount = await db.processBulkSales(json);
+        alert(`Vendas Importadas!\nR$ ${amount.toFixed(2)} registrados e estoque atualizado.`);
+        load();
+      } catch (error) {
+        alert("Erro ao processar planilha de vendas.");
+      } finally {
+        setIsUploadingSales(false);
+        e.target.value = '';
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   const handleQuickSaleSubmit = async () => {
     const amount = parseFloat(quickSaleValue.replace(',', '.'));
     if (!isNaN(amount) && amount > 0) {
@@ -60,6 +89,11 @@ const Dashboard: React.FC = () => {
           <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest italic tracking-[0.2em]">Gestão de Performance Livraria Nobel</p>
         </div>
         <div className="flex items-center gap-3">
+           <label className={`px-8 py-4 rounded-2xl font-black uppercase text-[10px] transition-all bg-blue-600 text-white hover:bg-blue-500 shadow-xl shadow-blue-600/10 cursor-pointer flex items-center gap-3 ${isUploadingSales ? 'opacity-50 pointer-events-none' : ''}`}>
+             {isUploadingSales ? 'Processando...' : '📥 Subir Vendas do Dia'}
+             <input type="file" className="hidden" onChange={handleSalesUpload} accept=".xlsx,.xls,.csv" />
+           </label>
+
            {isQuickSelling ? (
              <div className="flex items-center gap-2 bg-zinc-900 border border-yellow-400/50 p-1.5 rounded-2xl animate-in fade-in zoom-in duration-200 shadow-2xl">
                <span className="text-zinc-600 text-[10px] font-black uppercase ml-4">R$</span>
@@ -79,7 +113,7 @@ const Dashboard: React.FC = () => {
                onClick={() => setIsQuickSelling(true)}
                className={`px-8 py-4 rounded-2xl font-black uppercase text-[10px] transition-all active:scale-95 shadow-xl flex items-center gap-3 ${showSuccess ? 'bg-green-500 text-white shadow-green-500/20' : 'bg-yellow-400 text-black hover:bg-yellow-300 shadow-yellow-400/10'}`}
              >
-               {showSuccess ? '✓ Venda Registrada!' : '🚀 Lançar Venda'}
+               {showSuccess ? '✓ Venda Avulsa!' : '🚀 Venda Avulsa'}
              </button>
            )}
            <button onClick={() => setIsEditingGoal(!isEditingGoal)} className="bg-zinc-900 border border-zinc-800 text-zinc-400 px-6 py-4 rounded-2xl text-[10px] font-black uppercase hover:border-zinc-500 transition-all">Definir Metas</button>

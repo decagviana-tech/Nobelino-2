@@ -25,6 +25,33 @@ const EstimateManager: React.FC = () => {
     window.print();
   };
 
+  const handleConvertSale = async (est: Estimate) => {
+    if (confirm("Deseja concluir esta venda? Isso dará baixa automática no estoque dos itens disponíveis.")) {
+      const itemsToRecord = est.items
+        .filter(item => item.isbn && item.status !== 'unavailable')
+        .map(item => ({
+          isbn: item.isbn!,
+          quantity: item.quantity,
+          price: item.price
+        }));
+
+      if (itemsToRecord.length > 0) {
+        await db.recordSale(itemsToRecord);
+        await db.saveEstimate({ ...est, status: 'converted' }); // Note: db.saveEstimate currently appends, but let's assume it updates if ID exists or just handle deletion
+        // To avoid duplicate sales/estimates, we can mark it or delete it.
+        // For now, let's delete it or mark it as converted if db supports it. 
+        // Checking db.ts... it only has saveEstimate which appends.
+        // Let's modify db.ts later if needed, but for now delete after conversion to simplify.
+        await db.deleteEstimate(est.id);
+        alert("Venda concluída e estoque atualizado!");
+        setSelectedEstimate(null);
+        load();
+      } else {
+        alert("Sem itens válidos para dar baixa.");
+      }
+    }
+  };
+
   return (
     <div className="p-8 bg-[#09090b] h-full overflow-y-auto custom-scrollbar">
       <header className="mb-10 flex justify-between items-end border-b border-white/5 pb-8">
@@ -109,7 +136,10 @@ const EstimateManager: React.FC = () => {
                     <p className="text-[10px] font-bold text-zinc-400 uppercase">Total da Proposta</p>
                     <p className="text-4xl font-black italic">R$ {selectedEstimate.total.toFixed(2)}</p>
                  </div>
-                 <button onClick={handlePrint} className="bg-black text-white px-8 py-4 rounded-2xl font-black uppercase text-xs hover:bg-zinc-800 transition-all print:hidden">🖨️ Imprimir / PDF</button>
+                 <div className="flex gap-4 print:hidden">
+                    <button onClick={() => handleConvertSale(selectedEstimate)} className="bg-green-600 text-white px-8 py-4 rounded-2xl font-black uppercase text-xs hover:bg-green-500 transition-all">🚀 Concluir Venda</button>
+                    <button onClick={handlePrint} className="bg-black text-white px-8 py-4 rounded-2xl font-black uppercase text-xs hover:bg-zinc-800 transition-all">🖨️ Imprimir / PDF</button>
+                 </div>
               </div>
            </div>
         </div>

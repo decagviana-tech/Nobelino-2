@@ -110,6 +110,60 @@ export const db = {
     await this.save('nobel_estimates', updated);
   },
 
+  async recordSale(items: { isbn: string; quantity: number; price: number }[]) {
+    const currentInventory = await this.get('nobel_inventory') || [];
+    const updatedInventory = [...currentInventory];
+    let totalSaleAmount = 0;
+
+    items.forEach(item => {
+      const idx = updatedInventory.findIndex(b => this.normalizeISBN(b.isbn) === this.normalizeISBN(item.isbn));
+      if (idx !== -1) {
+        updatedInventory[idx] = {
+          ...updatedInventory[idx],
+          stockCount: Math.max(0, updatedInventory[idx].stockCount - item.quantity)
+        };
+      }
+      totalSaleAmount += item.price * item.quantity;
+    });
+
+    await this.save('nobel_inventory', updatedInventory);
+    await this.updateDailySales(totalSaleAmount);
+  },
+
+  async processBulkSales(salesJson: any[]) {
+    const currentInventory = await this.get('nobel_inventory') || [];
+    const updatedInventory = [...currentInventory];
+    let totalSaleAmount = 0;
+    
+    const ISBN_ALIASES = ['ISBN', 'EAN', 'SBN', 'Codigo', 'CÓDIGO', 'Barras', 'Referencia', 'id'];
+    const QTY_ALIASES = ['Quantidade', 'Qtd', 'Venda', 'Quantity', 'UN', 'Units'];
+
+    salesJson.forEach(row => {
+      const isbnKey = this.getValueByPattern(row, ISBN_ALIASES);
+      const qtyKey = this.getValueByPattern(row, QTY_ALIASES);
+      
+      const isbnRaw = isbnKey ? row[isbnKey] : undefined;
+      const isbnClean = this.normalizeISBN(isbnRaw);
+      const qty = this.parseValue(qtyKey ? row[qtyKey] : 1) || 1;
+
+      if (isbnClean) {
+        const idx = updatedInventory.findIndex(b => this.normalizeISBN(b.isbn) === isbnClean);
+        if (idx !== -1) {
+          const book = updatedInventory[idx];
+          updatedInventory[idx] = {
+            ...book,
+            stockCount: Math.max(0, book.stockCount - qty)
+          };
+          totalSaleAmount += (book.price || 0) * qty;
+        }
+      }
+    });
+
+    await this.save('nobel_inventory', updatedInventory);
+    await this.updateDailySales(totalSaleAmount);
+    return totalSaleAmount;
+  },
+
   parseValue(val: any): number | null {
     if (val === undefined || val === null || val === "") return null;
     if (typeof val === 'number') return val;
