@@ -17,6 +17,14 @@ const App: React.FC = () => {
   const [isApiActive, setIsApiActive] = useState(false);
 
   const checkApiKey = async () => {
+    // Primeiro checa se há no localStorage ou no window
+    const savedKey = localStorage.getItem('nobel_api_key');
+    if (savedKey) {
+      (window as any).API_KEY = savedKey;
+      setIsApiActive(true);
+      return;
+    }
+
     // @ts-ignore
     if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
       const hasKey = await window.aistudio.hasSelectedApiKey();
@@ -29,6 +37,15 @@ const App: React.FC = () => {
     if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
       await window.aistudio.openSelectKey();
       setIsApiActive(true);
+    } else {
+      // Fallback para navegador comum
+      const key = prompt("Insira sua Chave de API do Gemini:");
+      if (key) {
+        localStorage.setItem('nobel_api_key', key);
+        (window as any).API_KEY = key;
+        setIsApiActive(true);
+        alert("Chave conectada com sucesso!");
+      }
     }
   };
 
