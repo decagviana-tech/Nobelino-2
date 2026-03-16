@@ -1,5 +1,5 @@
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import type { Book, ChatMessage, KnowledgeEntry, PortableProcess, Estimate } from "../types";
 
 export interface AIResult {
@@ -101,7 +101,8 @@ export async function processUserQuery(
     };
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
+  // Use the @google/genai SDK (newer, supports Live API)
+  const ai = new GoogleGenAI({ apiKey });
 
   const relevantBooks = findRelevantBooks(query, inventory);
   const relevantKnowledge = findRelevantKnowledge(query, knowledge);
@@ -134,35 +135,33 @@ ${rulesText}
 ${processesText}
 ${stockContext}`;
 
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash",
-    generationConfig: {
-        temperature: 0.1,
-        responseMimeType: isBudgetRequest ? "application/json" : "text/plain",
-    }
-  }, { apiVersion: 'v1beta' }); // Explicitamente v1beta para garantir compatibilidade
-
   try {
-    const chatHistory = history.slice(-6).map(m => ({
-      role: m.role === 'user' ? 'user' : 'model',
+    const chatHistory = history.slice(-4).map(m => ({
+      role: m.role === 'user' ? 'user' : 'model' as any,
       parts: [{ text: m.content || "" }]
     }));
 
-    // Injetamos a system instruction no início da conversa se o SDK não suportar nativamente no getGenerativeModel
-    const contents = [
-        { role: 'user', parts: [{ text: `INSTRUÇÕES DE SISTEMA: ${systemInstruction}` }] },
-        { role: 'model', parts: [{ text: 'Entendido. Sou o Nobelino e seguirei essas instruções.' }] },
-        ...chatHistory,
-        { role: 'user', parts: [{ text: query }] }
-    ];
-
-    const result = await model.generateContent({
-        contents,
-        tools: shouldSearchWeb ? [{ googleSearchRetrieval: {} } as any] : []
+    const response = await ai.models.generateContent({
+      model: "gemini-1.5-flash", 
+      contents: [...chatHistory, { role: 'user', parts: [{ text: query }] }],
+      config: { 
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        temperature: 0.1, 
+        tools: shouldSearchWeb ? [{ googleSearch: {} }] : [],
+        responseMimeType: isBudgetRequest ? "application/json" : "text/plain"
+      }
     });
 
-    const response = await result.response;
-    const text = response.text();
+    let text = "";
+    try {
+      // Handle different versions of the @google/genai SDK
+      text = typeof (response as any).text === 'function' ? (response as any).text() : (response as any).text || "";
+      if (!text) {
+        text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      }
+    } catch (e) {
+      text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    }
 
     if (!text) throw new Error("Resposta AI vazia");
 
@@ -196,7 +195,7 @@ ${stockContext}`;
   } catch (error: any) {
     console.error("Erro AI:", error);
     return {
-      responseText: `🦉 Tive um pequeno soluço digital: ${error.message || 'Erro desconhecido'}. Verifique se a API está ATIVADA no Google Cloud e se a chave está correta.`,
+      responseText: `🦉 Tive um pequeno soluço digital: ${error.message || 'Erro desconhecido'}. Verifique se a API do Gemini está ATIVADA no Google Cloud e se sua chave tem faturamento ativo.`,
       recommendedBooks: [],
       isLocalResponse: true
     };
