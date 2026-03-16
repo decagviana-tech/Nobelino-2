@@ -10,6 +10,7 @@ interface Props {
   onClose: () => void;
 }
 
+
 const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => {
   const [isActive, setIsActive] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -24,6 +25,25 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const isClosingRef = useRef(false);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+
+  // Helper functions for search
+  const slugify = (text: string) => text.toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+  const searchInventory = (query: string) => {
+    const term = slugify(query);
+    return inventory
+      .filter(b => slugify(b.title).includes(term) || slugify(b.author).includes(term) || slugify(b.description || '').includes(term))
+      .slice(0, 5)
+      .map(b => ({ title: b.title, author: b.author, price: b.price, stock: b.stockCount, isbn: b.isbn }));
+  };
+
+  const searchKnowledge = (query: string) => {
+    const term = slugify(query);
+    return knowledge
+      .filter(k => slugify(k.topic).includes(term) || slugify(k.content).includes(term))
+      .slice(0, 3)
+      .map(k => ({ topic: k.topic, content: k.content }));
+  };
 
   const encode = (bytes: Uint8Array) => {
     let binary = '';
@@ -60,7 +80,6 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
     if (isClosingRef.current) return;
     isClosingRef.current = true;
     
-    // Desliga fisicamente o microfone
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(track => {
         track.stop();
@@ -69,7 +88,6 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
       mediaStreamRef.current = null;
     }
 
-    // Fecha conexões e contextos
     if (sessionRef.current) try { sessionRef.current.close(); } catch(e) {}
     if (audioContextRef.current) try { audioContextRef.current.close(); } catch(e) {}
     if (outputAudioContextRef.current) try { outputAudioContextRef.current.close(); } catch(e) {}
@@ -91,12 +109,12 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: (window as any).API_KEY || process.env.API_KEY });
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
       const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+        model: 'gemini-2.0-flash-exp', // Updated to a more standard model name if possible, or keep the experimental one for Live
         callbacks: {
           onopen: () => {
             if (isClosingRef.current || !audioContextRef.current) return;
@@ -116,6 +134,29 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
           onmessage: async (message: LiveServerMessage) => {
             if (isClosingRef.current) return;
             
+            // Handle Tool Calls
+            const toolCall = message.serverContent?.modelTurn?.parts?.[0]?.toolCall;
+            if (toolCall) {
+              const currentSession = await sessionPromise;
+              for (const call of toolCall.functionCalls) {
+                let result = {};
+                if (call.name === 'search_inventory') {
+                  result = { books: searchInventory(call.args.query as string) };
+                } else if (call.name === 'get_store_rules') {
+                  result = { rules: searchKnowledge(call.args.query as string) };
+                }
+                
+                await currentSession.sendToolResponse({
+                  functionResponses: [{
+                    name: call.name,
+                    response: { result },
+                    id: call.id
+                  }]
+                });
+              }
+              return;
+            }
+
             const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audioData && outputAudioContextRef.current) {
               setIsSpeaking(true);
@@ -135,20 +176,53 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
             }
           },
           onclose: () => { if (!isClosingRef.current) stopSession(); },
-          onerror: () => { setError("Erro na conexão de voz."); stopSession(); },
+          onerror: (e) => { console.error("Live Error:", e); setError("Erro na conexão de voz."); stopSession(); },
         },
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
+          tools: [{
+            functionDeclarations: [
+              {
+                name: 'search_inventory',
+                description: 'Busca livros no estoque real da loja por título, autor ou assunto.',
+                parameters: {
+                  type: 'OBJECT',
+                  properties: {
+                    query: { type: 'STRING', description: 'O termo de busca (título, autor ou tema)' }
+                  },
+                  required: ['query']
+                }
+              },
+              {
+                name: 'get_store_rules',
+                description: 'Busca regras da loja, políticas de troca, promoções e treinamentos.',
+                parameters: {
+                  type: 'OBJECT',
+                  properties: {
+                    query: { type: 'STRING', description: 'O assunto da dúvida (ex: trocas, pagamento)' }
+                  },
+                  required: ['query']
+                }
+              }
+            ]
+          } as any],
           systemInstruction: `VOCÊ É O NOBELINO, o mascote coruja da Livraria Nobel. 
           Sua voz é amigável e entusiasmada. 
           Sempre comece perguntando qual colaborador está falando com você.
-          Use o estoque para sugerir livros reais: ${inventory.slice(0,3).map(b => b.title).join(', ')}.`
+          
+          CAPACIDADES ESPECIAIS:
+          - Use 'search_inventory' sempre que o usuário perguntar por um livro, preço ou se algo está disponível.
+          - Use 'get_store_rules' para dúvidas sobre procedimentos da loja.
+          - NÃO INVENTE DADOS. Se não encontrar no estoque, diga que não localizou mas pode pesquisar na internet (se o chat permitir) ou encomendar.
+          
+          Contexto imediato (exemplos): ${inventory.slice(0,2).map(b => b.title).join(', ')}.`
         }
       });
 
       sessionRef.current = await sessionPromise;
     } catch (err: any) {
+      console.error("Session Start Error:", err);
       setError("Microfone não autorizado ou erro de conexão.");
       stopSession();
     }
