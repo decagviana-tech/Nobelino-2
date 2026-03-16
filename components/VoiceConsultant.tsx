@@ -114,7 +114,7 @@ const VoiceConsultant: React.FC<Props> = ({ inventory, knowledge, onClose }) => 
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
       const sessionPromise = ai.live.connect({
-        model: 'gemini-2.0-flash-exp', // Updated to a more standard model name if possible, or keep the experimental one for Live
+        model: 'gemini-2.0-flash-exp', // Modelo estável para Multimodal Live API
         callbacks: {
           onopen: () => {
             if (isClosingRef.current || !audioContextRef.current) return;

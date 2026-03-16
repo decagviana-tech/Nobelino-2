@@ -102,7 +102,7 @@ export async function processUserQuery(
   }
 
   // Use the @google/genai SDK (newer, supports Live API)
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey, apiVersion: 'v1' });
 
   const relevantBooks = findRelevantBooks(query, inventory);
   const relevantKnowledge = findRelevantKnowledge(query, knowledge);
@@ -142,7 +142,7 @@ ${stockContext}`;
     }));
 
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash", 
+      model: "gemini-1.5-flash-latest", 
       contents: [...chatHistory, { role: 'user', parts: [{ text: query }] }],
       config: { 
         systemInstruction: { parts: [{ text: systemInstruction }] },
