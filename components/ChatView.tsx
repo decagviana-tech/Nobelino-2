@@ -19,7 +19,8 @@ const ChatView: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
-    const hist = await db.get('nobel_chat_history');
+    // Mantemos o carregamento de dados, mas forçamos o reset das mensagens
+    await db.get('nobel_chat_history'); 
     const savedInventory = await db.get('nobel_inventory');
     const savedKnowledge = await db.get('nobel_knowledge_base') || [];
     const savedProcesses = await db.get('nobel_processes') || [];
@@ -28,8 +29,8 @@ const ChatView: React.FC = () => {
     setKnowledge(savedKnowledge);
     setProcesses(savedProcesses);
     
-    if (hist && hist.length > 0) setMessages(hist);
-    else resetChat();
+    // Sempre inicia uma nova conversa ao atualizar, como era antes
+    resetChat();
   };
 
   useEffect(() => { load(); }, []);
