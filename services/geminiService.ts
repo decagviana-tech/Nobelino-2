@@ -92,54 +92,56 @@ export async function processUserQuery(
   knowledge: KnowledgeEntry[] = [],
   processes: PortableProcess[] = []
 ): Promise<AIResult> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const model = "gemini-1.5-flash"; // Modelo mais rápido e barato
+  // Busca a chave em múltiplas fontes (env, window, ou fallback)
+  const apiKey = (process.env.API_KEY || (window as any).API_KEY || "");
+  
+  if (!apiKey) {
+    console.warn("API_KEY não encontrada.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const model = "gemini-1.5-flash";
 
   const relevantBooks = findRelevantBooks(query, inventory);
   const relevantKnowledge = findRelevantKnowledge(query, knowledge);
   const isQueryGreeting = isGreeting(query);
   const isBudgetRequest = query.toLowerCase().includes('orçamento') || query.toLowerCase().includes('proposta');
   
-  // Só ativa o Google Search se não tivermos nada no estoque E for uma dúvida de assunto
-  const shouldSearchWeb = !isQueryGreeting && relevantBooks.length === 0 && query.length > 15;
+  const shouldSearchWeb = !isQueryGreeting && relevantBooks.length === 0 && query.trim().length > 10;
 
-  const rulesText = relevantKnowledge.map(k => `[INSTRUÇÃO LOJA]: ${k.content}`).join('\n');
-  const processesText = processes.length > 0 && !isQueryGreeting ? `[PROCESSO SUGERIDO]: ${processes[0].name} (${processes[0].steps.join(' -> ')})` : '';
+  const rulesText = relevantKnowledge.map(k => `[LOJA]: ${k.content}`).join('\n');
+  const processesText = processes.length > 0 && !isQueryGreeting ? `[PROCESSO]: ${processes[0].name}` : '';
 
   let stockContext = "";
   if (isQueryGreeting) {
-    stockContext = "O vendedor está iniciando o atendimento.";
+    stockContext = "Início de conversa.";
   } else if (relevantBooks.length > 0) {
-    stockContext = `ESTOQUE LOCAL (PRIORIDADE):
-${relevantBooks.slice(0, 5).map(b => `- ${b.title} | R$ ${b.price} | SINOPSE: ${b.description?.slice(0, 100)}...`).join('\n')}`;
+    stockContext = `ESTOQUE LOCAL:
+${relevantBooks.slice(0, 5).map(b => `- ${b.title} | R$ ${b.price} | SINOPSE: ${b.description?.slice(0, 100) || 'Sem sinopse'}`).join('\n')}`;
   } else if (!shouldSearchWeb) {
-    stockContext = "Não encontramos livros com esse termo exato no estoque local.";
+    stockContext = "Nada encontrado no estoque local.";
   }
 
-  const systemInstruction = `Você é o NOBELINO, o Corujinha Consultor da Nobel Petrópolis. 
-
-MISSÃO: Ajudar o vendedor a encontrar livros pelo ASSUNTO nas SINOPSES.
-
+  const systemInstruction = `Você é o NOBELINO, o Corujinha Consultor. 
+AJUDE o vendedor a achar livros pelo ASSUNTO. 
 REGRAS:
-1. Priorize o ESTOQUE LOCAL. Se encontrar algo na SINOPSE que bate com o assunto, indique com entusiasmo.
-2. Se não houver estoque local relevante, use sua inteligência geral para sugerir autores/títulos e mencione que podemos encomendar.
-3. Mantenha respostas curtas e objetivas (máx 3 parágrafos).
-4. Se o cliente for comprar, lembre o vendedor de lançar a venda no Painel para atualizar o estoque.
+1. Priorize ESTOQUE LOCAL.
+2. Respostas curtas e amigáveis.
+3. Se vender, peça para registrar no Painel.
 
 ${rulesText}
 ${processesText}
 ${stockContext}`;
 
   try {
+    const chatHistory = history.slice(-4).map(m => ({
+      role: m.role === 'user' ? 'user' : 'model' as any,
+      parts: [{ text: m.content || "" }]
+    }));
+
     const response = await ai.models.generateContent({
       model,
-      contents: [
-        ...history.slice(-4).map(m => ({ // Reduzi histórico para economizar tokens
-          role: m.role === 'user' ? 'user' : 'model' as any, 
-          parts: [{ text: m.content }] 
-        })),
-        { role: 'user', parts: [{ text: query }] }
-      ],
+      contents: [...chatHistory, { role: 'user', parts: [{ text: query }] }],
       config: { 
         systemInstruction, 
         temperature: 0.1, 
@@ -148,22 +150,36 @@ ${stockContext}`;
       }
     });
 
-    const text = response.text;
-    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-    const urls = groundingChunks?.map((chunk: any) => ({
-      uri: chunk.web?.uri || '',
-      title: chunk.web?.title || 'Referência'
-    })).filter((u: any) => u.uri) || [];
+    // Acesso seguro ao texto (pode ser property ou function em algumas versões/SDKs)
+    let text = "";
+    try {
+      text = typeof (response as any).text === 'function' ? (response as any).text() : response.text;
+    } catch (e) {
+      text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    }
+
+    if (!text) throw new Error("Resposta AI vazia");
+
+    const urls = response.candidates?.[0]?.groundingMetadata?.groundingChunks
+      ?.map((chunk: any) => ({
+        uri: chunk.web?.uri || '',
+        title: chunk.web?.title || 'Referência'
+      })).filter((u: any) => u.uri) || [];
 
     if (isBudgetRequest && text.trim().startsWith('{')) {
-      const data = JSON.parse(text);
-      return {
-        responseText: data.responseText,
-        recommendedBooks: relevantBooks,
-        isLocalResponse: false,
-        detectedEstimate: data.estimate,
-        groundingUrls: urls
-      };
+      try {
+        const data = JSON.parse(text);
+        return {
+          responseText: data.responseText || "Aqui está o orçamento solicitado.",
+          recommendedBooks: relevantBooks,
+          isLocalResponse: false,
+          detectedEstimate: data.estimate,
+          groundingUrls: urls
+        };
+      } catch (jsonErr) {
+        // Fallback se o JSON falhar
+        return { responseText: text, recommendedBooks: relevantBooks, isLocalResponse: false, groundingUrls: urls };
+      }
     }
 
     return {
@@ -172,10 +188,10 @@ ${stockContext}`;
       isLocalResponse: false,
       groundingUrls: urls
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Erro AI:", error);
     return {
-      responseText: "🦉 Tive um pequeno soluço digital. Pode repetir a pergunta sobre o assunto?",
+      responseText: `🦉 Tive um pequeno soluço digital: ${error.message || 'Erro desconhecido'}. Verifique se a chave API está conectada.`,
       recommendedBooks: [],
       isLocalResponse: true
     };

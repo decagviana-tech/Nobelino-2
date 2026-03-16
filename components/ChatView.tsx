@@ -104,6 +104,12 @@ const ChatView: React.FC = () => {
       if (currentMood !== 'success') setCurrentMood('happy');
     } catch (e: any) {
       setCurrentMood('tired');
+      const errorMsg: ChatMessage = { 
+        role: 'assistant', 
+        content: `🦉 Tive um soluço: ${e.message || 'Erro desconhecido'}`, 
+        timestamp: new Date() 
+      };
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
     }
